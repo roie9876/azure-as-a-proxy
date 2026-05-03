@@ -124,20 +124,22 @@ resource stripRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
     matchProcessingBehavior: 'Continue'
     conditions: []
     actions: [
-      // Headers Front Door / Azure platform inject. Note: X-Azure-Ref is platform-bound and
-      // may reappear; we set it to empty (best-effort) and document the residual risk.
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Azure-Ref' } }
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Azure-FDID' } }
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Cache' } }
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-MSEdge-Ref' } }
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'Via' } }
+      // Front Door rules engine forbids modifying these reserved response headers
+      // (per https://learn.microsoft.com/azure/frontdoor/front-door-rules-engine-actions):
+      //   Accept-Ranges, Host, Connection, Content-Length, Transfer-Encoding, TE,
+      //   Last-Modified, Keep-Alive, Expect, Upgrade, If-*, Range, Warning, Forwarded,
+      //   Via, X-Forwarded-*, X-Azure-RequestChain*, X-Azure-FDID, X-Azure-Ref,
+      //   X-Ms-Via, X-Ms-Force-Refresh, X-MSEdge-Ref, plus any header prefixed `x-ec` or `x-fd`.
+      // Those reserved headers (Via, X-Azure-Ref, X-MSEdge-Ref) WILL appear on responses
+      // — they only reveal "behind some Azure CDN" with no tenant-specific info. Documented
+      // as residual signals. We strip what is allowed AND actually leaks SaaS identity.
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'Server', value: '' } }
-      // Suppress request-id / correlation that broker or ACA may emit.
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Request-Id' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Correlation-Id' } }
-      // Also strip framework fingerprints leaked from upstream (e.g. Next.js).
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Powered-By' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Cache' } }
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Prerender' } }
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Stale-Time' } }
     ]
   }
 }
@@ -150,10 +152,6 @@ resource privacyRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
     matchProcessingBehavior: 'Continue'
     conditions: []
     actions: [
-      // Continue stripping Next.js / framework fingerprints.
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Prerender' } }
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Stale-Time' } }
-      // Strong privacy headers added on every response.
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'Referrer-Policy', value: 'no-referrer' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'X-Content-Type-Options', value: 'nosniff' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'X-Frame-Options', value: 'DENY' } }
