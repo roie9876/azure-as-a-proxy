@@ -57,6 +57,9 @@ param brokerImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
 @description('Container image for the sandbox (Kasm Chromium). Set after ACR push.')
 param sandboxImage string = 'kasmweb/chromium:1.16.0'
 
+@description('Name of the ACR (in same subscription) hosting the broker/sandbox images. Empty = images are public.')
+param acrName string = ''
+
 @description('External OIDC issuer URL (Auth0/Okta/Keycloak/Entra). Leave empty to use stub auth in PoC.')
 param oidcIssuer string = ''
 
@@ -133,18 +136,6 @@ module acaEnv 'modules/aca-environment.bicep' = {
   }
 }
 
-module sessionsPool 'modules/sessions-pool.bicep' = {
-  scope: rg
-  name: 'sessions-pool'
-  params: {
-    namePrefix: namePrefix
-    location: location
-    tags: tags
-    sandboxImage: sandboxImage
-    sessionsSubnetId: network.outputs.sessionsSubnetId
-  }
-}
-
 module broker 'modules/aca-broker.bicep' = {
   scope: rg
   name: 'aca-broker'
@@ -155,11 +146,12 @@ module broker 'modules/aca-broker.bicep' = {
     acaEnvironmentId: acaEnv.outputs.environmentId
     brokerImage: brokerImage
     keyVaultName: keyvault.outputs.keyVaultName
-    sessionPoolManagementEndpoint: sessionsPool.outputs.poolManagementEndpoint
-    sessionPoolResourceId: sessionsPool.outputs.poolResourceId
+    sandboxImage: sandboxImage
+    sandboxSubnetId: network.outputs.sessionsSubnetId
     oidcIssuer: oidcIssuer
     oidcClientId: oidcClientId
     userAllowlist: userAllowlist
+    acrName: acrName
   }
 }
 
@@ -181,6 +173,4 @@ output frontDoorEndpoint string = frontDoor.outputs.endpointHostname
 output brokerFqdn string = broker.outputs.brokerFqdn
 output natGatewayPublicIp string = network.outputs.natPublicIp
 output keyVaultName string = keyvault.outputs.keyVaultName
-output sessionPoolName string = sessionsPool.outputs.poolName
-output sessionPoolManagementEndpoint string = sessionsPool.outputs.poolManagementEndpoint
 output logAnalyticsWorkspaceId string = observability.outputs.workspaceId

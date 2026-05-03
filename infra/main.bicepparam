@@ -13,8 +13,9 @@ param tags = {
 param vnetAddressSpace = '10.80.0.0/20'
 
 // Set these after `scripts/build-and-push.sh` populates ACR.
-param brokerImage = 'mcr.microsoft.com/k8se/quickstart:latest'
-param sandboxImage = 'kasmweb/chromium:1.16.0'
+param brokerImage = 'acrcloak9f1d7e.azurecr.io/cloak-broker:latest'
+param sandboxImage = 'acrcloak9f1d7e.azurecr.io/cloak-sandbox:latest'
+param acrName = 'acrcloak9f1d7e'
 
 // Stub auth in PoC — fill in real values when wiring an IdP.
 param oidcIssuer = ''

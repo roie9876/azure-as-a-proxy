@@ -145,9 +145,9 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           }
           delegations: [
             {
-              name: 'sessions-delegation'
+              name: 'aci-delegation'
               properties: {
-                serviceName: 'Microsoft.App/sessionPools'
+                serviceName: 'Microsoft.ContainerInstance/containerGroups'
               }
             }
           ]

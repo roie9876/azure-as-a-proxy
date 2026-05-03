@@ -1,9 +1,13 @@
-"""Sandbox lifecycle: allocate a Dynamic Sessions instance, mint an attach token,
-proxy the WebSocket between user and sandbox.
+"""Sandbox lifecycle: per-user Azure Container Instance (ACI) running Kasm Chromium.
 
-Attach tokens are opaque random IDs (NOT JWTs that encode SaaS info). State is held
-in-memory in the broker process. For HA across replicas, swap `_attach_store` for
-Redis (e.g. Azure Cache for Redis) — left as TODO.
+Warm pool pattern:
+- Background task keeps WARM_POOL_SIZE idle ACIs ready (created but unclaimed).
+- On user login, an idle ACI is claimed and its private endpoint returned (sub-second).
+- Replacement is spawned in the background to refill the pool.
+- On logout/idle timeout, the ACI is deleted.
+
+State is in-memory; for HA swap _idle_pool / _claimed for Redis. NAT GW handles egress
+cloaking; sandbox subnet is delegated to Microsoft.ContainerInstance/containerGroups.
 """
 from __future__ import annotations
 
@@ -22,69 +26,240 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+ARM_API_VERSION = "2023-05-01"
+ARM_BASE = "https://management.azure.com"
+
+_cred = DefaultAzureCredential()
+
+
+async def _arm_token() -> str:
+    loop = asyncio.get_running_loop()
+    tok = await loop.run_in_executor(None, lambda: _cred.get_token("https://management.azure.com/.default"))
+    return tok.token
+
+
+def _aci_url(name: str) -> str:
+    return (
+        f"{ARM_BASE}/subscriptions/{settings.azure_subscription_id}"
+        f"/resourceGroups/{settings.azure_resource_group}"
+        f"/providers/Microsoft.ContainerInstance/containerGroups/{name}"
+        f"?api-version={ARM_API_VERSION}"
+    )
+
+
+def _container_group_body(name: str) -> dict:
+    body: dict = {
+        "location": settings.azure_location,
+        "tags": {"project": "saas-network-identity-cloak", "managedBy": "broker", "name": name},
+        "properties": {
+            "osType": "Linux",
+            "restartPolicy": "OnFailure",
+            "subnetIds": [{"id": settings.sandbox_subnet_id}] if settings.sandbox_subnet_id else [],
+            "containers": [
+                {
+                    "name": "sandbox",
+                    "properties": {
+                        "image": settings.sandbox_image,
+                        "resources": {"requests": {"cpu": 2.0, "memoryInGB": 4.0}},
+                        "ports": [{"protocol": "TCP", "port": 6901}],
+                        "environmentVariables": [
+                            {"name": "VNC_PW", "value": "unused-internal-only"},
+                            {"name": "LANG", "value": "en_US.UTF-8"},
+                            {"name": "TZ", "value": "Europe/Stockholm"},
+                            {
+                                "name": "CHROME_USER_AGENT",
+                                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+                            },
+                            {"name": "CHROME_ACCEPT_LANG", "value": "en-US,en;q=0.9"},
+                        ],
+                    },
+                }
+            ],
+            "ipAddress": {
+                "type": "Private",
+                "ports": [{"protocol": "TCP", "port": 6901}],
+            },
+        },
+    }
+    if settings.acr_server and settings.acr_username and settings.acr_password:
+        body["properties"]["imageRegistryCredentials"] = [
+            {
+                "server": settings.acr_server,
+                "username": settings.acr_username,
+                "password": settings.acr_password,
+            }
+        ]
+    return body
+
+
+@dataclass
+class Sandbox:
+    name: str
+    private_ip: Optional[str] = None
+    state: str = "Pending"  # Pending | Running | Claimed | Terminating
+    claimed_by: Optional[str] = None
+    created_at: float = field(default_factory=time.time)
+
 
 @dataclass
 class AttachRecord:
     user_sub: str
-    session_id: str
+    sandbox_name: str
     sandbox_url: str
     expires_at: float = field(default_factory=lambda: time.time() + 60)
 
 
+# In-memory state
+_idle_pool: dict[str, Sandbox] = {}      # name -> Sandbox (Running, unclaimed)
+_pending: dict[str, Sandbox] = {}        # name -> Sandbox (still provisioning)
+_claimed: dict[str, Sandbox] = {}        # name -> Sandbox (claimed by user)
+_user_to_sandbox: dict[str, str] = {}    # user_sub -> sandbox name
 _attach_store: dict[str, AttachRecord] = {}
-_active_sessions: dict[str, str] = {}  # user_sub -> session_id
 
-_cred = DefaultAzureCredential()
-# Dynamic Sessions API audience.
-_TOKEN_SCOPE = "https://dynamicsessions.io/.default"
+_pool_lock = asyncio.Lock()
+_warmer_task: Optional[asyncio.Task] = None
 
 
-async def _bearer_token() -> str:
-    # azure-identity is sync; offload.
-    loop = asyncio.get_running_loop()
-    tok = await loop.run_in_executor(None, lambda: _cred.get_token(_TOKEN_SCOPE))
-    return tok.token
+async def _arm_request(method: str, url: str, json_body: Optional[dict] = None) -> tuple[int, dict]:
+    token = await _arm_token()
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30.0) as c:
+        r = await c.request(method, url, headers=headers, json=json_body)
+    try:
+        data = r.json() if r.content else {}
+    except Exception:  # noqa: BLE001
+        data = {"raw": r.text}
+    return r.status_code, data
+
+
+async def _create_aci(name: str) -> Sandbox:
+    sb = Sandbox(name=name, state="Pending")
+    _pending[name] = sb
+    body = _container_group_body(name)
+    status, data = await _arm_request("PUT", _aci_url(name), body)
+    if status >= 400:
+        logger.error("ACI create %s failed: %s %s", name, status, data)
+        _pending.pop(name, None)
+        raise RuntimeError(f"ACI create failed: {status}")
+    return sb
+
+
+async def _poll_until_running(sb: Sandbox, timeout: float = 180.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        status, data = await _arm_request("GET", _aci_url(sb.name))
+        if status >= 400:
+            logger.warning("poll %s -> %s", sb.name, status)
+            await asyncio.sleep(3)
+            continue
+        props = data.get("properties", {})
+        ig_state = props.get("instanceView", {}).get("state") or props.get("provisioningState")
+        ip = props.get("ipAddress", {}).get("ip")
+        if ip and ig_state in ("Running", "Succeeded"):
+            sb.private_ip = ip
+            sb.state = "Running"
+            return True
+        if ig_state in ("Failed", "Canceled"):
+            logger.error("ACI %s entered terminal state %s", sb.name, ig_state)
+            return False
+        await asyncio.sleep(3)
+    return False
+
+
+async def _delete_aci(name: str) -> None:
+    try:
+        await _arm_request("DELETE", _aci_url(name))
+    except Exception as ex:  # noqa: BLE001
+        logger.warning("ACI delete %s failed: %s", name, ex)
+
+
+async def _provision_one_into_pool() -> None:
+    name = f"sbx-{int(time.time())}-{_secrets.token_hex(3)}"
+    try:
+        sb = await _create_aci(name)
+    except Exception as ex:  # noqa: BLE001
+        logger.error("warm provision failed: %s", ex)
+        return
+    ok = await _poll_until_running(sb)
+    _pending.pop(name, None)
+    if not ok:
+        await _delete_aci(name)
+        return
+    async with _pool_lock:
+        if sb.claimed_by is None and name not in _claimed:
+            _idle_pool[name] = sb
+            logger.info("warm sandbox ready: %s ip=%s (idle pool size=%d)", name, sb.private_ip, len(_idle_pool))
+
+
+async def _warmer_loop() -> None:
+    """Keep _idle_pool at WARM_POOL_SIZE."""
+    while True:
+        try:
+            async with _pool_lock:
+                shortfall = settings.warm_pool_size - len(_idle_pool) - len(_pending)
+            if shortfall > 0:
+                await asyncio.gather(*[_provision_one_into_pool() for _ in range(shortfall)])
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            raise
+        except Exception as ex:  # noqa: BLE001
+            logger.exception("warmer loop error: %s", ex)
+            await asyncio.sleep(10)
+
+
+async def start_warmer() -> None:
+    global _warmer_task
+    if _warmer_task is None or _warmer_task.done():
+        _warmer_task = asyncio.create_task(_warmer_loop(), name="sandbox-warmer")
+        logger.info("sandbox warmer started (target=%d)", settings.warm_pool_size)
+
+
+async def stop_warmer() -> None:
+    global _warmer_task
+    if _warmer_task:
+        _warmer_task.cancel()
+        try:
+            await _warmer_task
+        except asyncio.CancelledError:
+            pass
+        _warmer_task = None
 
 
 async def allocate_sandbox(user_sub: str) -> AttachRecord:
-    """Allocate (or reuse) a Dynamic Sessions sandbox for this user, mint attach token."""
-    if not settings.session_pool_endpoint:
-        raise HTTPException(status_code=500, detail="session pool not configured")
+    """Claim a warm sandbox; if pool empty, provision on demand and wait."""
+    # Reuse if user already has one
+    existing = _user_to_sandbox.get(user_sub)
+    if existing and existing in _claimed:
+        sb = _claimed[existing]
+    else:
+        async with _pool_lock:
+            sb: Optional[Sandbox] = None
+            if _idle_pool:
+                name, sb = _idle_pool.popitem()
+                sb.claimed_by = user_sub
+                sb.state = "Claimed"
+                _claimed[name] = sb
+                _user_to_sandbox[user_sub] = name
+        if sb is None:
+            # Cold path: spin one up synchronously
+            logger.info("idle pool empty, cold-provisioning for %s", user_sub)
+            name = f"sbx-{int(time.time())}-{_secrets.token_hex(3)}"
+            sb = await _create_aci(name)
+            ok = await _poll_until_running(sb)
+            _pending.pop(name, None)
+            if not ok:
+                await _delete_aci(name)
+                raise HTTPException(status_code=502, detail="sandbox provisioning failed")
+            sb.claimed_by = user_sub
+            sb.state = "Claimed"
+            _claimed[name] = sb
+            _user_to_sandbox[user_sub] = name
 
-    session_id = _active_sessions.get(user_sub) or f"u-{user_sub[:8]}-{_secrets.token_hex(4)}"
-    token = await _bearer_token()
-    api_version = "2025-02-02-preview"
-
-    # Dynamic Sessions: allocate is implicit on first request to /code/execute|/proxy.
-    # For Kasm we just want the session URL. The pool exposes a per-session base URL via:
-    #   GET {poolManagementEndpoint}/sessions/{identifier}?api-version=...
-    # If the session does not exist, calling any session-scoped endpoint creates it.
-    base = settings.session_pool_endpoint.rstrip("/")
-    url = f"{base}/sessions/{session_id}?api-version={api_version}"
-
-    async with httpx.AsyncClient(timeout=15.0) as c:
-        r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
-        if r.status_code in (200, 201):
-            data = r.json()
-        elif r.status_code == 404:
-            # Trigger creation via the proxy endpoint (any HTTP request to the session forces alloc).
-            create_url = f"{base}/sessions/{session_id}/proxy?api-version={api_version}"
-            r2 = await c.get(create_url, headers={"Authorization": f"Bearer {token}"})
-            if r2.status_code >= 500:
-                logger.error("sandbox alloc failed: %s %s", r2.status_code, r2.text)
-                raise HTTPException(status_code=502, detail="sandbox allocation failed")
-            data = {"identifier": session_id}
-        else:
-            logger.error("sessions API error: %s %s", r.status_code, r.text)
-            raise HTTPException(status_code=502, detail="sessions api error")
-
-    sandbox_url = f"{base}/sessions/{session_id}/proxy?api-version={api_version}"
-    _active_sessions[user_sub] = session_id
-
+    sandbox_url = f"http://{sb.private_ip}:6901"
     attach = _secrets.token_urlsafe(32)
     rec = AttachRecord(
         user_sub=user_sub,
-        session_id=session_id,
+        sandbox_name=sb.name,
         sandbox_url=sandbox_url,
         expires_at=time.time() + settings.attach_token_ttl_seconds,
     )
@@ -100,22 +275,17 @@ def consume_attach(token: str) -> Optional[AttachRecord]:
 
 
 def mint_attach_token(rec: AttachRecord) -> str:
-    """Re-add a record under a new token (for client redirect)."""
     tok = _secrets.token_urlsafe(32)
     _attach_store[tok] = rec
     return tok
 
 
 async def destroy_sandbox(user_sub: str) -> None:
-    session_id = _active_sessions.pop(user_sub, None)
-    if not session_id:
+    name = _user_to_sandbox.pop(user_sub, None)
+    if not name:
         return
-    token = await _bearer_token()
-    api_version = "2025-10-02-preview"
-    base = settings.session_pool_endpoint.rstrip("/")
-    stop_url = f"{base}/.management/stopSession?api-version={api_version}&identifier={session_id}"
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as c:
-            await c.post(stop_url, headers={"Authorization": f"Bearer {token}"})
-    except Exception as ex:  # noqa: BLE001
-        logger.warning("stopSession failed for %s: %s", session_id, ex)
+    sb = _claimed.pop(name, None)
+    if sb:
+        sb.state = "Terminating"
+    await _delete_aci(name)
+    logger.info("destroyed sandbox %s for user %s", name, user_sub)

@@ -11,9 +11,23 @@ class Settings(BaseSettings):
     # Logging
     broker_log_level: str = Field("INFO")
 
-    # ACA Dynamic Sessions
-    session_pool_endpoint: str = Field("", description="poolManagementEndpoint URL")
-    session_pool_resource_id: str = Field("")
+    # Azure (for ACI provisioning)
+    azure_subscription_id: str = Field("")
+    azure_resource_group: str = Field("")
+    azure_location: str = Field("swedencentral")
+
+    # Sandbox image (Kasm Chromium) deployed as ACI per session
+    sandbox_image: str = Field("")
+    sandbox_subnet_id: str = Field("", description="VNet subnet (delegated to Microsoft.ContainerInstance/containerGroups)")
+
+    # ACR creds for sandbox image pull (passed to ACI imageRegistryCredentials)
+    acr_name: str = Field("")
+    acr_server: str = Field("")
+    acr_username: str = Field("")
+    acr_password: str = Field("")
+
+    # Warm pool: keep N idle sandboxes ready for instant alloc
+    warm_pool_size: int = Field(2, ge=0, le=20)
 
     # Key Vault (managed identity is used for auth)
     key_vault_name: str = Field("")

@@ -41,6 +41,8 @@ from .sessions import (
     consume_attach,
     destroy_sandbox,
     mint_attach_token,
+    start_warmer,
+    stop_warmer,
 )
 
 logging.basicConfig(level=settings.broker_log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -50,8 +52,12 @@ logger = logging.getLogger("broker")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     bag.load()
-    logger.info("broker started; stub_auth=%s", settings.stub_auth)
-    yield
+    await start_warmer()
+    logger.info("broker started; stub_auth=%s warm_pool_size=%d", settings.stub_auth, settings.warm_pool_size)
+    try:
+        yield
+    finally:
+        await stop_warmer()
 
 
 app = FastAPI(title="cloak-broker", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
