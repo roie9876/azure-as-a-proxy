@@ -77,6 +77,48 @@ To regenerate the PNG after editing the `.drawio`:
 7. SaaS sees the **NAT Gateway public IP** (Azure-owned, in the chosen egress region) — never the corp IP, never the user.
 8. On logout/idle/timeout the sandbox is destroyed. Next session = fresh sandbox.
 
+### 4.1 Session Broker — why it has to exist
+
+The Session Broker is **not** an Azure product. It's a small custom service hosted as a regular Azure Container App (1 container image, 2–5 replicas behind ACA's internal ingress) and is the only thing Azure Front Door exposes publicly.
+
+ACA Dynamic Sessions provides an API to spin up and destroy a Hyper-V isolated sandbox per call, but it does **not** know:
+
+- *who* the user is — there is no built-in authentication
+- *which* sandbox belongs to which user
+- how to hand the user a one-time URL to attach to their sandbox
+- when to destroy the sandbox
+
+The broker fills that gap. Without it, there is no auth boundary, no per-user mapping, and no lifecycle control over the sandbox pool.
+
+### 4.2 Session Broker — responsibilities
+
+1. **Terminate the user session** — receives the HTTPS request from Front Door at `portal.contoso.com` over Private Link.
+2. **Authenticate** the user via the external IdP (OIDC redirect to Auth0 / Okta / Keycloak).
+3. **Authorize** — verify the user is in the allowlist group (≈ X users).
+4. **Allocate a sandbox** — call the ACA Dynamic Sessions REST API (`POST .../sessionPools/{name}/sessions`) using a managed identity; receive `sessionId` + internal endpoint.
+5. **Mint a short-lived signed token** (HS256/RS256, key from Key Vault) bound to `(userId, sessionId, exp ≈ 30s)`.
+6. **Redirect** the browser to `wss://portal.contoso.com/attach?token=…`. Front Door routes the WebSocket upgrade through Private Link back to the broker, which proxies it into the sandbox's Kasm/Neko streamer.
+7. **Track lifecycle** — accept heartbeat from the sandbox; on logout / idle timeout / tab close, call `DELETE .../sessions/{id}` so ACA tears the Hyper-V VM down.
+8. **Emit audit logs** — `userId → sessionId → start/stop time → egress IP` to Log Analytics.
+
+**Why a Container App and not a Function or VM:**
+
+| Need | Why ACA Container App fits |
+|---|---|
+| Long-lived WebSocket per user (pixel stream) | ACA supports WebSockets natively; Functions handle them poorly |
+| Private VNet + Private Link from Front Door | ACA internal ingress supports both |
+| Scale 2 → 5 replicas on concurrent sessions | KEDA HTTP scaler |
+| Stateless, easy redeploy | Container image, no host to patch |
+| Cheap when idle (≈ 2 small replicas) | Per-second compute billing |
+
+**What the broker is not:**
+
+- Not a reverse proxy for the SaaS — SaaS traffic never touches the broker; it goes sandbox → NAT Gateway → SaaS.
+- Not where SaaS responses are decoded or rewritten — that's exactly the model that failed for prior vendors.
+- Not a state store — sandbox state lives in ACA; user state lives in the IdP.
+
+In one line: **the broker is the auth + sandbox-lifecycle controller that turns a logged-in user into a ready-to-stream sandbox and tears it down when they leave.**
+
 ---
 
 ## 5. What the user can and cannot see — the cloaking promise
