@@ -8,7 +8,7 @@
 
 ## 1. Topology
 
-![Architecture topology](topology.png)
+![Architecture topology](topology.png?v=2)
 
 Source: [topology.drawio](topology.drawio) — open in [draw.io](https://app.diagrams.net) or the VS Code drawio extension.
 
