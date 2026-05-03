@@ -1,1 +1,38 @@
 .$*.bkp
+
+# IaC
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Bicep build artifacts
+infra/**/*.json
+!infra/**/parameters/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Logs
+*.log
