@@ -196,7 +196,7 @@ Only after all 6 pass → build production environment, broker, hardened image, 
 |---|---|
 | Hide visual branding too | **Path B** — requires SaaS API; build custom UI on App Service / Container Apps. Different project. |
 | Defeat user on their own laptop (memory, screen recording) | **Path C** — move workflow to a device the user does not control: **Windows 365** or **AVD** with locked-down session host, no clipboard/print/screenshot, conditional access enforced. Even this does not defeat the "phone camera pointed at screen" attack. |
-| Plain "hide corp public IP" (no SaaS-identity hiding) | **Path D** — VPN/ExpressRoute → AKS or VMSS with Envoy/Squid → NAT Gateway. Different stack entirely; Front Door would actually leak. See [egress-proxy-design.md](egress-proxy-design.md) for that pattern. |
+| Plain "hide corp public IP" (no SaaS-identity hiding) | **Path D** — VPN/ExpressRoute → AKS or VMSS with Envoy/Squid → NAT Gateway. Different stack entirely; Front Door would actually leak. Out of scope for this design. |
 
 ---
 
@@ -207,4 +207,3 @@ Only after all 6 pass → build production environment, broker, hardened image, 
 | `README.md` | This document |
 | `topology.drawio` | Editable architecture diagram (open in draw.io) |
 | `topology.png` | Rendered topology image referenced in §1 |
-| `egress-proxy-design.md` | Earlier design for Path D (egress IP cloaking via Envoy/Squid). Different problem, kept for reference. |
