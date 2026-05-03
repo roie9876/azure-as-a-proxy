@@ -5,7 +5,7 @@
 param namePrefix string
 @description('Tags.')
 param tags object
-@description('Internal FQDN of the broker container app (e.g. ca-cloak-broker.internal.<env>.swedencentral.azurecontainerapps.io).')
+@description('FQDN of the broker container app on the ACA env load balancer (e.g. ca-cloak-broker.<env>.swedencentral.azurecontainerapps.io). Reachable only via the env Private Endpoint because vnetConfiguration.internal=true.')
 param brokerFqdn string
 @description('ACA managed environment resource ID (Private Link target).')
 param brokerResourceId string
@@ -89,6 +89,10 @@ resource origin 'Microsoft.Cdn/profiles/originGroups/origins@2024-02-01' = {
   parent: originGroup
   name: 'broker'
   properties: {
+    // brokerFqdn is the runtime ingress.fqdn of the broker container app:
+    // '<app>.<env>.<region>.azurecontainerapps.io' (public-form, since the env
+    // uses External VIP / internal=false). The env edge proxy uses Host header
+    // matching to route from FD's PE -> this app.
     hostName: brokerFqdn
     httpPort: 80
     httpsPort: 443

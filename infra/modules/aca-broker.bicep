@@ -65,7 +65,12 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
         }
       ] : []
       ingress: {
-        external: false
+        // external=true means the app is exposed on the env's edge proxy under
+        // its public-form FQDN. Combined with env publicNetworkAccess=Disabled,
+        // the only way to reach this app is via FD's shared Private Link
+        // (groupId=managedEnvironments). FD originHostHeader = the runtime fqdn,
+        // which the env edge proxy uses to route to this specific container app.
+        external: true
         targetPort: 8000
         transport: 'auto' // WebSocket support
         allowInsecure: false

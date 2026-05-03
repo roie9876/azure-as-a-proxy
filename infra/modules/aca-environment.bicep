@@ -1,5 +1,12 @@
-// ACA managed environment: workload profiles, internal-only ingress, VNet-injected.
-// Internal ingress is required so Front Door reaches it ONLY via Private Endpoint.
+// ACA managed environment: workload profiles, External VIP + VNET-injected,
+// publicNetworkAccess=Disabled. This combination is required for FD Private Link:
+//   - Workload profiles: prerequisite for FD-ACA Private Link integration.
+//   - VNET-injection: needed so env outbound egresses via our NAT GW (static IP).
+//   - internal=false (External VIP): apps get public-form FQDN
+//     '<app>.<env>.<region>.azurecontainerapps.io' which is what the env edge proxy
+//     accepts as Host header when traffic arrives via FD's shared Private Link.
+//   - publicNetworkAccess=Disabled: blocks all public traffic; only PE traffic allowed.
+//     (Per docs: PNA can be Disabled on External VIP envs and is changeable after creation.)
 @description('Naming prefix.')
 param namePrefix string
 @description('Azure region.')
@@ -28,7 +35,7 @@ resource env 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
     }
     vnetConfiguration: {
       infrastructureSubnetId: infraSubnetId
-      internal: true
+      internal: false
     }
     workloadProfiles: [
       {
