@@ -1,6 +1,6 @@
 # Azure SaaS Network-Identity Cloak — Path A
 
-> **Goal:** Let corporate users in Israel access an unknown third-party SaaS *without* the user being able to determine the destination's network identity (URL, DNS, tenant ID, headers, cookies, body) from any tool on their endpoint.
+> **Goal:** Let a fixed population of corporate users (count: X) access an unknown third-party SaaS *without* the user being able to determine the destination's network identity (URL, DNS, tenant ID, headers, cookies, body) from any tool on their endpoint.
 >
 > **Scope:** This document covers **Path A** only — hide network identity. The user will still see the SaaS's rendered UI (branding visible). See §6 for what is explicitly out of scope.
 
@@ -32,7 +32,7 @@ To regenerate the PNG after editing the `.drawio`:
 | R6 | Auth to the destination is **whatever the SaaS demands** (not Entra-bound) | ✅ handled inside sandbox |
 | R7 | **File upload** support to the SaaS | ⚠️ via streamer's controlled upload channel only (see §5) |
 | R8 | No clipboard, print, camera/mic, USB, extensions, persistence, mobile, native clients | ✅ accepted — simplifies design |
-| R9 | ~50 users, IL-based; egress region not required to be IL | ✅ |
+| R9 | ~X users (size: small — e.g. ~50); egress region need not match the user region | ✅ |
 | R10 | Customer prefers **PaaS / managed Azure services** over AKS | ✅ design uses ACA + Front Door, no AKS |
 | R11 | SaaS ToS allows access via RBI | ✅ confirmed by customer |
 
@@ -58,13 +58,13 @@ To regenerate the PNG after editing the `.drawio`:
 | Public surface | **Azure Front Door Premium** + WAF + DDoS Std | TLS termination at `portal.contoso.com`, your cert, anycast, WAF |
 | Auth gate | **Session Broker** (Azure Container Apps) | OIDC login (non-Entra IdP), allocates sandbox, issues signed session URL |
 | Per-user sandbox | **Azure Container Apps — Dynamic Sessions** | Hyper-V isolated, 1 sandbox = 1 user, destroyed on logout. Custom container = Chromium + streaming server (Kasm / Neko / similar) |
-| Egress | **NAT Gateway + Standard Public IP** (or `/29` Public IP Prefix) | Stable Azure WEU egress IP visible to the SaaS |
+| Egress | **NAT Gateway + Standard Public IP** (or `/29` Public IP Prefix) | Stable Azure egress IP visible to the SaaS |
 | DNS | **Azure DNS Private Resolver** | Region-consistent DNS resolution |
 | Secrets | **Key Vault** | OIDC client secret, session-token signing keys |
 | Identity | **External IdP** (Auth0 / Okta / Keycloak — customer choice) | Non-Entra OIDC for who can reach the cloak |
 | Observability | **Log Analytics** + Front Door / ACA diagnostics | Audit + troubleshooting |
 
-**Region:** `westeurope` (or `eastus` / similar) — explicitly **not** `israelcentral`.
+**Region:** Pick an Azure region appropriate to the customer's data-residency, latency, and SaaS-allowlisting needs. The egress region does **not** have to match the user region; in many cloaking deployments it deliberately doesn't.
 
 ### How a session flows
 
@@ -74,7 +74,7 @@ To regenerate the PNG after editing the `.drawio`:
 4. Broker returns a signed connect URL pointing at the sandbox's streamer endpoint, fronted via Front Door.
 5. User's browser opens a **WebSocket** to the streamer; sees only pixels / virtualized DOM.
 6. Inside the sandbox, Chromium navigates to the real SaaS, performs whatever auth the SaaS demands (password, MFA, SAML, OIDC, passkey if streamer supports WebAuthn forwarding).
-7. SaaS sees the **NAT Gateway public IP** (Azure WEU) — never the corp IP, never the user.
+7. SaaS sees the **NAT Gateway public IP** (Azure-owned, in the chosen egress region) — never the corp IP, never the user.
 8. On logout/idle/timeout the sandbox is destroyed. Next session = fresh sandbox.
 
 ---
@@ -154,7 +154,7 @@ Some SaaS will **not function** inside an RBI sandbox even though network cloaki
 
 ### 6.5 Compliance / legal
 - ❌ This design does not establish whether using the SaaS via RBI complies with the SaaS's ToS for *all* features. Customer asserted "ToS allows it" — get this in writing, ideally per-feature.
-- ❌ Data-residency analysis is **not done**. SaaS data flows out of `westeurope`; if any data is regulated as IL-only, this design violates it. Customer must confirm.
+- ❌ Data-residency analysis is **not done**. SaaS traffic egresses from the chosen Azure region; if data is subject to a residency constraint that forbids that region, this design violates it. Customer must confirm.
 - ❌ Audit trail of *what users did inside the SaaS* is limited to network metadata (Front Door logs, NAT GW flows). **Session recording** of the rendered pixels can be added (Kasm and similar support it) but adds storage cost and retention obligations.
 
 ---
@@ -163,12 +163,12 @@ Some SaaS will **not function** inside an RBI sandbox even though network cloaki
 
 These are the **load-bearing unknowns**. Without answers, the design is provisional.
 
-1. **Which SaaS?** Without naming it we cannot verify HSTS, anti-bot posture, WebAuthn, API availability. A 30-minute test from a fresh Azure WEU IP is mandatory.
+1. **Which SaaS?** Without naming it we cannot verify HSTS, anti-bot posture, WebAuthn, API availability. A 30-minute test from a fresh Azure IP in the candidate egress region is mandatory.
 2. **Login walkthrough** — show me a screen-share of one user logging in today. Reveals auth method, IdP, MFA, redirects, passkey use, conditional access.
 3. **Top 3 user journeys** — show end-to-end what users actually do. Reveals upload sizes, multi-tab needs, real session length.
 4. **Endpoint posture** — corporate-managed with browser-policy push capability, or unmanaged? Determines whether endpoint controls (block direct `*.saas.com`) are available.
 5. **Egress IP allowlisting** — does the SaaS care about source IP? If yes, our NAT Gateway PIP must be registered with them.
-6. **Data residency** — any regulatory constraint preventing egress from `westeurope`?
+6. **Data residency** — any regulatory constraint on which Azure region traffic may egress from?
 7. **Acceptance test** — one concrete pass/fail criterion, e.g. *"User opens DevTools and Wireshark for 1 hour; cannot identify the destination domain or tenant ID."*
 
 See [`questions.md` discussion](#) elsewhere in this conversation for the full list narrowed to 8 critical items.
@@ -180,11 +180,11 @@ See [`questions.md` discussion](#) elsewhere in this conversation for the full l
 | Step | Goal | Pass criterion |
 |---|---|---|
 | 1 | Single ACA Dynamic Sessions sandbox + Kasm + Chromium pointed at the actual SaaS | Login + 1 real workflow end-to-end |
-| 2 | Front Door Premium + Private Link to sandbox via temporary domain | WebSocket stable, latency < 120ms RTT IL→WEU |
+| 2 | Front Door Premium + Private Link to sandbox via temporary domain | WebSocket stable, latency acceptable end-to-end (target: < 120ms RTT user→egress region) |
 | 3 | Red-team test with DevTools + Wireshark + memory tools for 1 hour | Cannot identify destination domain, tenant ID, or any SaaS-specific string |
 | 4 | 5 concurrent users → 20 concurrent users | Sandboxes remain isolated; no cross-contamination; cold-start < 3s |
 | 5 | Cost telemetry on real workflows for 1 week | Per-user-month cost within budget envelope |
-| 6 | SaaS bot/abuse posture | No CAPTCHA wall, no IP block from Azure WEU egress |
+| 6 | SaaS bot/abuse posture | No CAPTCHA wall, no IP block from the Azure egress IP |
 
 Only after all 6 pass → build production environment, broker, hardened image, IdP integration, observability.
 
