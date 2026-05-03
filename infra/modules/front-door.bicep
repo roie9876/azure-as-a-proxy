@@ -115,6 +115,7 @@ resource ruleSet 'Microsoft.Cdn/profiles/ruleSets@2024-02-01' = {
 }
 
 // Strip Azure / Front Door fingerprint headers from responses to the user.
+// Note: max 10 actions per rule, so we split strip + privacy headers into two rules.
 resource stripRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
   parent: ruleSet
   name: 'stripHeaders'
@@ -134,6 +135,24 @@ resource stripRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
       // Suppress request-id / correlation that broker or ACA may emit.
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Request-Id' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Correlation-Id' } }
+      // Also strip framework fingerprints leaked from upstream (e.g. Next.js).
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Powered-By' } }
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Cache' } }
+    ]
+  }
+}
+
+resource privacyRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
+  parent: ruleSet
+  name: 'privacyHeaders'
+  properties: {
+    order: 2
+    matchProcessingBehavior: 'Continue'
+    conditions: []
+    actions: [
+      // Continue stripping Next.js / framework fingerprints.
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Prerender' } }
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Nextjs-Stale-Time' } }
       // Strong privacy headers added on every response.
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'Referrer-Policy', value: 'no-referrer' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'X-Content-Type-Options', value: 'nosniff' } }
@@ -141,6 +160,9 @@ resource stripRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' } }
     ]
   }
+  dependsOn: [
+    stripRule
+  ]
 }
 
 // --- Security policy (binds WAF to endpoint) ---
