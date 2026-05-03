@@ -133,7 +133,7 @@ resource stripRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = {
       // Those reserved headers (Via, X-Azure-Ref, X-MSEdge-Ref) WILL appear on responses
       // — they only reveal "behind some Azure CDN" with no tenant-specific info. Documented
       // as residual signals. We strip what is allowed AND actually leaks SaaS identity.
-      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Overwrite', headerName: 'Server', value: '' } }
+      { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'Server' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Request-Id' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Correlation-Id' } }
       { name: 'ModifyResponseHeader', parameters: { typeName: 'DeliveryRuleHeaderActionParameters', headerAction: 'Delete', headerName: 'X-Powered-By' } }
