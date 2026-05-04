@@ -364,180 +364,78 @@ The sandbox runs a real Chromium against the real SaaS, so cookies, third-party 
 
 ## 8. Install / deploy
 
-This is a from-scratch deploy into a clean Azure subscription. The Bicep is **subscription-scoped** (creates the resource group itself); ACR is the only thing it does **not** provision, because images must exist in ACR before Container Apps can pull them.
+This is a from-scratch deploy into a clean Azure subscription. The Bicep is **subscription-scoped** (creates the resource group itself). The default `infra/main.bicepparam` points at the public images on **GitHub Container Registry** (`ghcr.io/roie9876/cloak-broker:v1` and `ghcr.io/roie9876/cloak-sandbox:v1`), so a customer can deploy without building or pushing anything.
 
 ### 8.1 Prerequisites
 
 | Tool | Why | Min version |
 |---|---|---|
 | Azure CLI (`az`) | All control-plane calls | 2.60+ |
-| Bicep CLI | `az bicep build` (auto-installed by `az`) | 0.27+ |
-| Docker with `buildx` | Cross-build linux/amd64 images on Apple Silicon | 24+ |
-| Bash (`zsh` is fine) | Run the helper scripts | — |
-| jq, curl | Smoke-test script | any |
-| Azure subscription | Owner or Contributor + User Access Administrator | — |
-| Quota | 4 vCPU in your region for **Container Apps Consumption** workloads (broker + per-user sandboxes). The default subscription quota is usually enough for a PoC. | — |
+| Python 3 | Used by `deploy.sh` to parse outputs and mint the broker secret | 3.9+ |
+| `curl` | `/healthz` poll inside `deploy.sh` | any |
+| Azure subscription | Owner (or Contributor + User Access Administrator) | — |
+| Quota | 4 vCPU for Container Apps Consumption + 1 Front Door Premium profile in the chosen region | — |
 
-The Bicep is parameterised for **swedencentral** but any region with Front Door Premium + Container Apps + ACR will work — change `location` in `infra/main.bicepparam`.
+The default region is `swedencentral`. Change `location` in `infra/main.bicepparam` for any other Front Door Premium + Container Apps region.
 
-### 8.2 One-time: pre-create ACR
-
-The Bicep does *not* create the registry, because the broker and sandbox container images need to exist before the Container Apps reference them. Pick a globally unique name and create it once:
+### 8.2 Three-command deploy
 
 ```bash
 az login
 export AZURE_SUBSCRIPTION_ID="<your-sub-id>"
-az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-
-ACR_NAME="acrcloak$(openssl rand -hex 3)"   # e.g. acrcloak9f1d7e
-RG="rg-cloak-swedencentral"
-LOC="swedencentral"
-
-az group create -n "$RG" -l "$LOC"
-az acr create -g "$RG" -n "$ACR_NAME" --sku Premium --admin-enabled false
-```
-
-> Premium SKU is required because the broker uses **managed-identity pull** with a private endpoint over the VNet; the Standard SKU does not support private endpoints.
-
-Then update `infra/main.bicepparam` so `acrName`, `brokerImage`, and `sandboxImage` all reference your `$ACR_NAME`:
-
-```bicep
-param acrName     = 'acrcloak9f1d7e'
-param brokerImage  = 'acrcloak9f1d7e.azurecr.io/cloak-broker:latest'
-param sandboxImage = 'acrcloak9f1d7e.azurecr.io/cloak-sandbox:kiosk-v2'
-param saasUrl      = 'https://<your-saas-origin>/'
-param insecureSaas = '1'   // '0' once SaaS is on a CA-signed cert
-```
-
-### 8.3 Build & push the two images
-
-Both images must be **`linux/amd64`** — the AKS/ACA nodes are amd64, and `docker build` on Apple Silicon defaults to arm64 which silently fails to start in ACA.
-
-```bash
-./scripts/build-and-push.sh "$ACR_NAME"
-```
-
-This script `buildx`-builds and pushes:
-
-- `cloak-broker:latest` — FastAPI session broker (~150 MB)
-- `cloak-sandbox:latest` — Debian 12 + Xvfb + fluxbox + x11vnc + websockify + noVNC + Chromium + the bundled picker extension (~1.2 GB)
-
-Verify both tags landed:
-
-```bash
-az acr repository list -n "$ACR_NAME" -o tsv
-```
-
-> If you re-tag the sandbox (e.g. `kiosk-v3`), update `sandboxImage` in `main.bicepparam` and redeploy.
-
-### 8.4 Deploy the infrastructure
-
-```bash
 ./scripts/deploy.sh
 ```
 
-That script runs `az deployment sub create` against `infra/main.bicep` with `infra/main.bicepparam`. It provisions, in one go:
+That single script:
 
-- VNet `10.80.0.0/20` with subnets for the ACA env (delegated), sandbox VMSS, NAT Gateway, private endpoints
-- **NAT Gateway** + a static public IP — single egress for all outbound traffic from broker and sandboxes (deterministic IP for SaaS allowlisting)
-- **Container Apps environment** (internal, VNet-injected, workload profile = Consumption)
-- **Broker Container App** (`ca-cloak-broker`) — pinned `minReplicas=1, maxReplicas=1` (see §2.2)
-- **Front Door Premium** + WAF (Prevention mode, Microsoft_DefaultRuleSet 2.1) with a **shared Private Link** origin to the ACA env — public ingress is anycast `*.azurefd.net` only
-- **Key Vault** (RBAC mode, soft-delete on) for the broker session secret
-- **Log Analytics + Application Insights** wired to the broker
+1. Validates and runs the Bicep at subscription scope (creates RG, VNet + NAT GW, ACA env, broker Container App, Front Door Premium + WAF, Key Vault, Log Analytics + App Insights — ~10–15 min).
+2. Auto-approves the Front Door shared Private Link to the ACA env.
+3. Generates the `broker-session-secret`, stores it in Key Vault, and force-restarts the broker so it picks up the secret.
+4. Polls `https://<frontDoorEndpoint>/healthz` until it returns 200 (up to 12 min for FD probe convergence).
+5. Prints the public endpoint URL, the broker FQDN, and the NAT Gateway egress IP.
 
-Deploy takes ~10–15 minutes on a clean subscription. The first run produces three outputs you'll want:
+When it finishes, open the printed URL in a browser. Send the NAT Gateway IP to the SaaS owner for ingress allowlisting.
 
-```jsonc
-{
-  "frontDoorEndpoint": "https://ep-cloak-XXXXXXXX.b02.azurefd.net",
-  "brokerFqdn":        "ca-cloak-broker.<env-id>.swedencentral.azurecontainerapps.io",
-  "natGatewayPublicIp":"<a.b.c.d>"   // give this to the SaaS owner for allowlisting
-}
-```
-
-### 8.5 First-deploy gotcha — Front Door Private Link approval
-
-Front Door's shared Private Link to the ACA env starts in **Pending** state. The deploy script does **not** auto-approve it (you can't approve from inside the same Bicep). Approve once:
-
-```bash
-PE_NAME=$(az network private-endpoint-connection list \
-  -g rg-cloak-swedencentral --name cae-cloak \
-  --type Microsoft.App/managedEnvironments \
-  --query "[?properties.privateLinkServiceConnectionState.status=='Pending'].name" -o tsv)
-
-az network private-endpoint-connection approve \
-  -g rg-cloak-swedencentral --resource-name cae-cloak \
-  --type Microsoft.App/managedEnvironments \
-  --name "$PE_NAME" --description "FD shared PL"
-```
-
-After approval, give Front Door **5–10 minutes** to converge probes before the endpoint will return 200.
-
-### 8.6 Seed the broker session secret
-
-The broker reads `BROKER_SESSION_SECRET` from Key Vault via managed identity. Generate and store one:
-
-```bash
-SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
-az keyvault secret set \
-  --vault-name kv-cloak-XXXXXXXX \
-  --name broker-session-secret \
-  --value "$SECRET"
-
-# force the broker to pick it up
-az containerapp update -g rg-cloak-swedencentral -n ca-cloak-broker \
-  --revision-suffix "secret-$(date +%H%M%S)"
-```
-
-(The KV name is in the deploy output; it follows the pattern `kv-cloak-<8-char-suffix>`.)
-
-### 8.7 Smoke test
-
-```bash
-./scripts/smoke-test.sh
-```
-
-Or manually:
-
-```bash
-curl -sS -i https://ep-cloak-XXXXXXXX.b02.azurefd.net/healthz
-# expect: HTTP/2 200 ; body: {"ok":true}
-```
-
-Then open the FD endpoint in a browser. You should see the noVNC iframe load and the SaaS render inside it. F12 should show **only** the FD hostname — no SaaS hostname, no SaaS cookies (verify with the recipe in [docs/F12-cloaking-test.md](docs/F12-cloaking-test.md)).
-
-### 8.8 Lock down (before handing the URL to users)
+### 8.3 Lock down (before handing the URL to users)
 
 These are **off by default** for the PoC; turn them on before any real traffic:
 
-1. **WAF source-IP allowlist.** Edit `allowedSourceIps` in `infra/main.bicepparam`:
-   ```bicep
-   param allowedSourceIps = ['1.2.3.4/32', '5.6.7.0/24']
-   ```
-   Redeploy. WAF will then 403 every request that isn't from those CIDRs.
-2. **Custom domain.** Set `portalHostname` to a domain you own, add the AFD validation TXT record, and bind the managed cert. The `*.azurefd.net` host is fine for a PoC but trivially identifies the platform.
-3. **SaaS cert.** Once the SaaS origin moves off a self-signed cert, flip `insecureSaas = '0'`.
-4. **NAT IP → SaaS allowlist.** Send `natGatewayPublicIp` to the SaaS owner so they can allowlist it; this is what makes the cloak's egress identity stable.
-5. **Front Door IP restriction at the SaaS.** If the SaaS supports it, lock its ingress to the **NAT GW IP only**. Now nobody can reach the SaaS without going through the cloak.
+1. **WAF source-IP allowlist** — set `allowedSourceIps = ['1.2.3.4/32', ...]` in `infra/main.bicepparam` and re-run `./scripts/deploy.sh`. WAF will 403 every request from outside those CIDRs.
+2. **Custom domain** — set `portalHostname`, add the AFD TXT validation record, bind the managed cert.
+3. **SaaS cert** — once the SaaS origin moves off a self-signed cert, flip `insecureSaas = '0'`.
+4. **SaaS ingress** — restrict the SaaS itself to the NAT Gateway IP printed by the deploy. Now nobody can reach the SaaS except through the cloak.
 
-### 8.9 Updating
-
-| Change | Command |
-|---|---|
-| Broker code edit | `./scripts/build-and-push.sh $ACR_NAME` then `az containerapp update -g rg-cloak-swedencentral -n ca-cloak-broker --image $ACR_NAME.azurecr.io/cloak-broker:latest` |
-| Sandbox image (Chromium policy, picker extension, etc.) | Bump tag in `main.bicepparam` (e.g. `kiosk-v2` → `kiosk-v3`), `./scripts/build-and-push.sh`, `./scripts/deploy.sh` |
-| Infra (Bicep) | `./scripts/deploy.sh` — incremental, idempotent |
-| WAF rules / allowlist | Edit `infra/modules/frontdoor.bicep` or `allowedSourceIps`, `./scripts/deploy.sh` |
-
-### 8.10 Tear down
+### 8.4 Tear down
 
 ```bash
 az group delete -n rg-cloak-swedencentral --yes
-# Front Door profile is RG-scoped too; nothing else lives outside the RG.
 ```
 
-ACR is in the same RG, so the registry goes with it. If you want to keep image history, move the registry into a separate "shared services" RG before tearing down.
+The Front Door profile is RG-scoped too; nothing lives outside the resource group.
+
+### 8.5 Building images from source (optional)
+
+You only need this if you've changed broker or sandbox code. Two options:
+
+**A. GitHub Actions (recommended).** Push a tag like `v2` and the workflow at [.github/workflows/publish-images.yml](.github/workflows/publish-images.yml) builds both `linux/amd64` images and pushes them to your fork's GHCR.
+
+**B. Local build + push.** Requires Docker with `buildx`:
+
+```bash
+echo "$GITHUB_PAT" | docker login ghcr.io -u <gh-user> --password-stdin
+docker buildx build --platform linux/amd64 \
+  -t ghcr.io/<gh-user>/cloak-broker:v2 --push -f broker/Dockerfile broker/
+docker buildx build --platform linux/amd64 \
+  -t ghcr.io/<gh-user>/cloak-sandbox:v2 --push -f sandbox/Dockerfile sandbox/
+```
+
+Then either:
+
+- Set `brokerImage` / `sandboxImage` in `infra/main.bicepparam` to your tags, **or**
+- Pass them positionally: `./scripts/deploy.sh ghcr.io/<gh-user>/cloak-broker:v2 ghcr.io/<gh-user>/cloak-sandbox:v2`.
+
+To use a private ACR instead of GHCR, set `acrName = '<your-acr>'` in `infra/main.bicepparam` and point `brokerImage`/`sandboxImage` at `<acr>.azurecr.io/...`. The Bicep will then wire up managed-identity AcrPull for the Container App.
+
 
 ---
 

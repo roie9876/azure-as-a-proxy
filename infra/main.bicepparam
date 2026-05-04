@@ -12,12 +12,17 @@ param tags = {
 
 param vnetAddressSpace = '10.80.0.0/20'
 
-// Set these after `scripts/build-and-push.sh` populates ACR.
-// IMPORTANT: ACR is NOT provisioned by this Bicep — pre-create it (or change `acrName`)
-// and push the broker + sandbox images before deploying.
-param brokerImage = 'acrcloak9f1d7e.azurecr.io/cloak-broker:latest'
-param sandboxImage = 'acrcloak9f1d7e.azurecr.io/cloak-sandbox:kiosk-v2'
-param acrName = 'acrcloak9f1d7e'
+// Default images live in the public GHCR for this repo — no ACR, no creds, no
+// build step. A customer cloning the repo can `./scripts/deploy.sh` straight
+// away and ACA will pull the images anonymously from GitHub Container Registry.
+//
+// To use your own private ACR instead:
+//   1. set `acrName = '<your-acr>'`
+//   2. set brokerImage/sandboxImage to '<your-acr>.azurecr.io/...'
+//   3. push images via `scripts/build-and-push.sh <your-acr>`
+param brokerImage  = 'ghcr.io/roie9876/cloak-broker:v1'
+param sandboxImage = 'ghcr.io/roie9876/cloak-sandbox:v1'
+param acrName      = ''   // empty = anonymous public pull (GHCR/Docker Hub/etc.)
 
 // Pin the SaaS the kiosk Chromium will load. Required.
 param saasUrl = 'https://arh2b5deb8dmcvcf.fz37.alb.azure.com/'
