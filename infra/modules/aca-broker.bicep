@@ -127,10 +127,6 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'SANDBOX_SUBNET_ID', value: sandboxSubnetId }
             { name: 'SAAS_URL', value: saasUrl }
             { name: 'INSECURE_SAAS', value: insecureSaas }
-            { name: 'ACR_NAME', value: acrName }
-            { name: 'ACR_SERVER', value: useAcr ? '${acrName}.azurecr.io' : '' }
-            { name: 'ACR_USERNAME', value: useAcr ? acr.listCredentials().username : '' }
-            { name: 'ACR_PASSWORD', secretRef: useAcr ? 'acr-password' : null }
             { name: 'WARM_POOL_SIZE', value: '2' }
             { name: 'SESSION_IDLE_TIMEOUT_SECONDS', value: '600' }
             { name: 'BROKER_LOG_LEVEL', value: 'INFO' }
@@ -140,6 +136,12 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'UPLOAD_SESSION_MAX_BYTES', value: string(uploadSessionMaxBytes) }
             { name: 'SANDBOX_INBOX_PORT', value: '6902' }
           ],
+          useAcr ? [
+            { name: 'ACR_NAME', value: acrName }
+            { name: 'ACR_SERVER', value: '${acrName}.azurecr.io' }
+            { name: 'ACR_USERNAME', value: acr.listCredentials().username }
+            { name: 'ACR_PASSWORD', secretRef: 'acr-password' }
+          ] : [],
           empty(sandboxInboxToken) ? [] : [
             { name: 'SANDBOX_INBOX_TOKEN', secretRef: 'sandbox-inbox-token' }
           ])
