@@ -62,29 +62,26 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: useAcr ? [
-        {
-          name: 'acr-password'
-          value: acr.listCredentials().passwords[0].value
-        }
-        {
-          name: 'broker-session-secret'
-          value: brokerSessionSecret
-        }
-        {
-          name: 'sandbox-inbox-token'
-          value: sandboxInboxToken
-        }
-      ] : [
-        {
-          name: 'broker-session-secret'
-          value: brokerSessionSecret
-        }
-        {
-          name: 'sandbox-inbox-token'
-          value: sandboxInboxToken
-        }
-      ]
+      secrets: concat(
+        useAcr ? [
+          {
+            name: 'acr-password'
+            value: acr.listCredentials().passwords[0].value
+          }
+        ] : [],
+        [
+          {
+            name: 'broker-session-secret'
+            value: brokerSessionSecret
+          }
+        ],
+        empty(sandboxInboxToken) ? [] : [
+          {
+            name: 'sandbox-inbox-token'
+            value: sandboxInboxToken
+          }
+        ]
+      )
       registries: useAcr ? [
         {
           server: '${acrName}.azurecr.io'
@@ -116,7 +113,7 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: [
+          env: concat([
             { name: 'AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
             { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name }
             { name: 'AZURE_LOCATION', value: location }
@@ -136,8 +133,10 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'UPLOAD_MAX_BYTES', value: string(uploadMaxBytes) }
             { name: 'UPLOAD_SESSION_MAX_BYTES', value: string(uploadSessionMaxBytes) }
             { name: 'SANDBOX_INBOX_PORT', value: '6902' }
+          ],
+          empty(sandboxInboxToken) ? [] : [
             { name: 'SANDBOX_INBOX_TOKEN', secretRef: 'sandbox-inbox-token' }
-          ]
+          ])
           probes: [
             {
               type: 'Liveness'
