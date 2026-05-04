@@ -39,7 +39,8 @@
   "UserAgentClientHintsEnabled": false,
   "UserAgentClientHintsGREASEUpdateEnabled": false,
 
-  "ExtensionInstallBlocklist": ["*"],
+  "_note_extensions": "We ship ONE trusted unpacked extension (Cloak file picker) via --load-extension; --disable-extensions-except locks Chromium to that one. We don't set ExtensionInstallBlocklist=['*'] because that can also block command-line-loaded extensions on some Chromium builds.",
+  "ExtensionInstallSources": [],
 
   "URLAllowlist": ["*"],
   "URLBlocklist": [],

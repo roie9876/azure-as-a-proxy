@@ -55,6 +55,21 @@ sleep 0.5
 # blocks every other source. Optional shared-secret check via INBOX_TOKEN.
 mkdir -p "${HOME}/uploads"
 chmod 700 "${HOME}/uploads"
+
+# Defense-in-depth: even though the Cloak picker extension hijacks the GTK
+# file dialog so the user never sees the desktop, scrub the home dir of
+# anything that would be embarrassing if the extension ever fails-open.
+# The kiosk runs as user `cloak` with no document templates, so this is
+# mostly empty already, but we delete the standard XDG dirs to be sure.
+for d in Desktop Documents Downloads Music Pictures Public Templates Videos; do
+  rm -rf "${HOME}/${d}" 2>/dev/null || true
+done
+chmod 700 "${HOME}"
+# GTK bookmarks: only show ~/uploads in the file dialog sidebar (in case
+# the extension is ever bypassed; the dialog at least won't list user dirs).
+mkdir -p "${HOME}/.config/gtk-3.0"
+printf 'file://%s/uploads Sandbox uploads\n' "${HOME}" > "${HOME}/.config/gtk-3.0/bookmarks"
+
 INBOX_PORT=6902 INBOX_DIR="${HOME}/uploads" \
   python3 /usr/local/bin/cloak-file-inbox.py >/tmp/file-inbox.log 2>&1 &
 INBOX_PID=$!
@@ -95,7 +110,13 @@ CHROME_FLAGS=(
   --disable-component-update
   --disable-background-networking
   --disable-sync
-  --disable-extensions
+  # Load ONLY the Cloak picker extension; block any other extension load
+  # path (Web Store, drag-drop, dev mode). The picker hijacks <input
+  # type=file> clicks and shows a sandbox-only file list, so the SaaS
+  # never triggers the GTK Open File dialog (which would expose the
+  # desktop in the streamed view).
+  --load-extension=/opt/cloak-picker
+  --disable-extensions-except=/opt/cloak-picker
   --disable-dev-shm-usage
   --user-agent="${CHROME_USER_AGENT}"
   --accept-lang="${CHROME_ACCEPT_LANG}"

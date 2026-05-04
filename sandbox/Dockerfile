@@ -35,10 +35,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
-# Chromium managed-policy lockdown (no DevTools, no extensions, no clipboard,
-# no downloads, no print, no incognito, no popups, no URL bar via kiosk).
+# Chromium managed-policy lockdown (no DevTools, no clipboard, no downloads,
+# no print, no incognito, no popups, no URL bar via kiosk).
+# Note: extensions are NOT globally blocked because we ship one trusted
+# unpacked extension (the Cloak file picker). Policy allowlists it by ID.
 RUN mkdir -p /etc/chromium/policies/managed
 COPY chromium-policies.json /etc/chromium/policies/managed/cloak.json
+
+# Bundled Cloak picker extension. Loaded unpacked via --load-extension so
+# the SaaS never sees the GTK file dialog (which would expose the desktop).
+COPY picker-extension /opt/cloak-picker
 
 # Non-root user
 RUN useradd -m -u 1000 -s /bin/bash cloak

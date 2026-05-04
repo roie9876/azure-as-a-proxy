@@ -74,15 +74,59 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _is_localhost(self) -> bool:
+        return self.client_address[0] in {"127.0.0.1", "::1", "localhost"}
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/healthz":
             return self._send_json(HTTPStatus.OK, {"ok": True})
+
+        # Listing + file-fetch are ONLY for the in-sandbox Chromium extension.
+        # Broker (off-box) must not enumerate or read user files.
         if self.path == "/list":
+            if not self._is_localhost():
+                return self._send_json(HTTPStatus.FORBIDDEN, {"error": "localhost only"})
             files = []
             for f in sorted(UPLOAD_DIR.iterdir()):
                 if f.is_file():
-                    files.append({"name": f.name, "size": f.stat().st_size})
-            return self._send_json(HTTPStatus.OK, {"files": files})
+                    st = f.stat()
+                    files.append({"name": f.name, "size": st.st_size, "mtime": int(st.st_mtime)})
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            import json as _json
+            payload = _json.dumps({"files": files}).encode("utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        if self.path.startswith("/file/"):
+            if not self._is_localhost():
+                return self._send_json(HTTPStatus.FORBIDDEN, {"error": "localhost only"})
+            from urllib.parse import unquote
+            raw = unquote(self.path[len("/file/"):])
+            name = _safe_basename(raw)
+            target = UPLOAD_DIR / name
+            if not target.is_file():
+                return self._send_json(HTTPStatus.NOT_FOUND, {"error": "no such file"})
+            size = target.stat().st_size
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            with target.open("rb") as fh:
+                while True:
+                    chunk = fh.read(64 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+            return
+
         return self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
