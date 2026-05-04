@@ -18,8 +18,8 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .auth import (
     BROWSER_ID_COOKIE,
@@ -39,6 +39,7 @@ from .sessions import (
     start_warmer,
     stop_warmer,
 )
+from .upload import aclose as upload_aclose, handle_upload, reset_quota
 
 logging.basicConfig(level=settings.broker_log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("broker")
@@ -52,6 +53,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         await stop_warmer()
+        await upload_aclose()
 
 
 app = FastAPI(title="cloak-broker", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -73,7 +75,6 @@ async def readyz():
 # No portal/sign-in UI: the broker mints a routing cookie automatically.
 # The user lands directly inside the per-browser ACI sandbox where the SaaS
 # enforces its own authentication.
-</html>"""
 
 ATTACH_HTML = """<!doctype html>
 <html lang="en">
@@ -81,13 +82,61 @@ ATTACH_HTML = """<!doctype html>
 <meta charset="utf-8">
 <title>Workspace</title>
 <meta name="referrer" content="no-referrer">
-<style>html,body,iframe{margin:0;padding:0;height:100%;width:100%;background:#000;border:0}</style>
+<style>
+  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;border:0;font-family:system-ui,sans-serif}
+  iframe{position:absolute;inset:0;height:100%;width:100%;border:0;background:#000}
+  #upbar{position:fixed;top:8px;right:8px;z-index:10;background:rgba(20,20,24,.78);
+         color:#eaeaea;border:1px solid #333;border-radius:8px;padding:6px 10px;
+         font-size:12px;display:flex;gap:8px;align-items:center;backdrop-filter:blur(6px)}
+  #upbar button{background:#2a6df4;color:#fff;border:0;border-radius:5px;padding:5px 10px;
+                font-size:12px;cursor:pointer}
+  #upbar button:disabled{opacity:.5;cursor:wait}
+  #upmsg{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#cbd}
+  #upbar.hidden{display:none}
+</style>
 </head>
 <body>
 <!-- noVNC client served by sandbox's websockify; reverse-proxied through the
      broker so the user's browser only ever talks to the cloak's domain.
      /websockify is the same-origin WS upgrade target. -->
 <iframe src="/vnc.html?autoconnect=1&resize=remote&path=websockify"></iframe>
+
+<div id="upbar" title="Files land in ~/uploads/ inside the sandbox; the SaaS file picker can attach them.">
+  <input id="upfile" type="file" style="display:none">
+  <button id="upbtn" type="button">Upload file</button>
+  <span id="upmsg">No file uploaded yet.</span>
+</div>
+
+<script>
+(function(){
+  const btn = document.getElementById('upbtn');
+  const inp = document.getElementById('upfile');
+  const msg = document.getElementById('upmsg');
+  btn.addEventListener('click', () => inp.click());
+  inp.addEventListener('change', async () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    btn.disabled = true;
+    msg.textContent = 'Uploading ' + f.name + '…';
+    try {
+      const fd = new FormData();
+      fd.append('file', f, f.name);
+      const r = await fetch('/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        msg.textContent = 'Failed: ' + (j.detail || r.status);
+      } else {
+        msg.textContent = 'Stored as ' + j.name + ' (' + Math.round(j.size/1024) + ' KB)';
+      }
+    } catch (e) {
+      msg.textContent = 'Error: ' + e;
+    } finally {
+      btn.disabled = false;
+      inp.value = '';
+    }
+  });
+})();
+</script>
 </body>
 </html>"""
 
@@ -131,6 +180,7 @@ async def logout(request: Request):
     s = read_session_cookie(request)
     if s:
         await destroy_sandbox(s.sub)
+        reset_quota(s.sub)
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie(SESSION_COOKIE, path="/")
     return resp
@@ -144,6 +194,14 @@ async def session_page(request: Request):
         return redirect
     await allocate_sandbox(s.sub)
     return HTMLResponse(ATTACH_HTML)
+
+
+# ---------- File upload (broker-mediated; see docs/UPLOAD.md) ----------
+@app.post("/upload")
+async def upload(request: Request, file: UploadFile = File(...)):
+    s = require_session(request)
+    result = await handle_upload(request, s.sub, file)
+    return JSONResponse(result, status_code=201)
 
 
 # ---------- Reverse proxy: broker -> Kasm sandbox (HTTP + WebSocket) ----------
@@ -272,7 +330,7 @@ def _get_proxy_client() -> httpx.AsyncClient:
 # Paths reserved by the broker — never proxied to the sandbox.
 _BROKER_PATHS = {
     "", "healthz", "readyz", "logout", "session",
-    "websockify", "favicon.ico",
+    "websockify", "favicon.ico", "upload",
 }
 
 

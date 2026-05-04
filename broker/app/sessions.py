@@ -61,19 +61,31 @@ def _container_group_body(name: str) -> dict:
                     "properties": {
                         "image": settings.sandbox_image,
                         "resources": {"requests": {"cpu": 2.0, "memoryInGB": 4.0}},
-                        "ports": [{"protocol": "TCP", "port": settings.sandbox_port}],
+                        "ports": [
+                            {"protocol": "TCP", "port": settings.sandbox_port},
+                            {"protocol": "TCP", "port": settings.sandbox_inbox_port},
+                        ],
                         "environmentVariables": [
                             {"name": "SAAS_URL", "value": settings.saas_url},
                             {"name": "LANG", "value": "en_US.UTF-8"},
                             {"name": "TZ", "value": "Europe/Stockholm"},
                             {"name": "SCREEN_GEOMETRY", "value": "1920x1080x24"},
+                            {"name": "INBOX_PORT", "value": str(settings.sandbox_inbox_port)},
+                            {"name": "INBOX_TOKEN", "value": settings.sandbox_inbox_token},
+                            {
+                                "name": "BROKER_INBOX_MAX_BYTES",
+                                "value": str(settings.upload_max_bytes),
+                            },
                         ],
                     },
                 }
             ],
             "ipAddress": {
                 "type": "Private",
-                "ports": [{"protocol": "TCP", "port": settings.sandbox_port}],
+                "ports": [
+                    {"protocol": "TCP", "port": settings.sandbox_port},
+                    {"protocol": "TCP", "port": settings.sandbox_inbox_port},
+                ],
             },
         },
     }

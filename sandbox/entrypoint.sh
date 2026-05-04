@@ -49,6 +49,17 @@ websockify "${WEBSOCKIFY_ARGS[@]}" >/tmp/websockify.log 2>&1 &
 WS_PID=$!
 sleep 0.5
 
+# 4b. file-inbox — accept POST /inbox uploads from the broker, drop into
+# ~/uploads/ so Chromium's <input type=file> picker can attach them.
+# Bound on 0.0.0.0:6902 because the broker reaches us via VNet IP; subnet NSG
+# blocks every other source. Optional shared-secret check via INBOX_TOKEN.
+mkdir -p "${HOME}/uploads"
+chmod 700 "${HOME}/uploads"
+INBOX_PORT=6902 INBOX_DIR="${HOME}/uploads" \
+  python3 /usr/local/bin/cloak-file-inbox.py >/tmp/file-inbox.log 2>&1 &
+INBOX_PID=$!
+sleep 0.2
+
 # 5. Chromium — kiosk, pointed at the SaaS URL.
 #    --app= strips the URL bar / tabs / menus. --kiosk forces fullscreen.
 #    Lockdown policies (no DevTools, no ext, no clipboard) live in
@@ -98,7 +109,7 @@ CHROME_FLAGS=(
 # Trap to clean up children on exit
 cleanup() {
   echo "[cloak] shutting down"
-  kill "${WS_PID}" "${X11VNC_PID}" "${FLUX_PID}" "${XVFB_PID}" 2>/dev/null || true
+  kill "${INBOX_PID}" "${WS_PID}" "${X11VNC_PID}" "${FLUX_PID}" "${XVFB_PID}" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 

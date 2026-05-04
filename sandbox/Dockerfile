@@ -13,6 +13,7 @@
 #
 # Ports:
 #   6901 — websockify (broker proxies WS frames here)
+#   6902 — file-inbox HTTP (broker forwards user uploads here)
 FROM debian:12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -43,9 +44,10 @@ COPY chromium-policies.json /etc/chromium/policies/managed/cloak.json
 RUN useradd -m -u 1000 -s /bin/bash cloak
 
 COPY entrypoint.sh /usr/local/bin/cloak-entrypoint.sh
-RUN chmod +x /usr/local/bin/cloak-entrypoint.sh
+COPY file-inbox.py /usr/local/bin/cloak-file-inbox.py
+RUN chmod +x /usr/local/bin/cloak-entrypoint.sh /usr/local/bin/cloak-file-inbox.py
 
-EXPOSE 6901
+EXPOSE 6901 6902
 USER cloak
 WORKDIR /home/cloak
 

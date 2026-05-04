@@ -46,5 +46,25 @@ class Settings(BaseSettings):
     session_idle_timeout_seconds: int = Field(900)
     browser_id_ttl_seconds: int = Field(60 * 60 * 8)  # 8h
 
+    # File upload (broker-mediated). User picks file in their own browser, broker
+    # forwards bytes to the claimed sandbox's file-inbox so Chromium's file
+    # picker can attach them. See docs/UPLOAD.md.
+    upload_enabled: bool = Field(True)
+    upload_max_bytes: int = Field(100 * 1024 * 1024)        # per file: 100 MB
+    upload_session_max_bytes: int = Field(500 * 1024 * 1024) # per browser: 500 MB
+    upload_mime_allowlist: str = Field(
+        "application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation,"
+        "application/msword,application/vnd.ms-excel,application/vnd.ms-powerpoint,"
+        "image/png,image/jpeg,image/gif,image/webp,"
+        "text/plain,text/csv,text/markdown,"
+        "application/zip,application/json,application/xml",
+        description="Comma-separated allowlist of Content-Type values accepted by /upload",
+    )
+    sandbox_inbox_port: int = Field(6902)
+    sandbox_inbox_token: str = Field("", description="Optional shared secret broker<->sandbox inbox")
+
 
 settings = Settings()

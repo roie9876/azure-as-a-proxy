@@ -34,6 +34,16 @@ param maxReplicas int = 5
 @secure()
 param brokerSessionSecret string = newGuid()
 
+@description('Enable broker-mediated /upload endpoint (user picks file in their own browser, broker forwards to sandbox file-inbox). See docs/UPLOAD.md.')
+param uploadEnabled bool = true
+@description('Per-file upload cap in bytes. Front Door / ACA ingress hard limit is 100 MB.')
+param uploadMaxBytes int = 100 * 1024 * 1024
+@description('Per-browser-session aggregate upload cap in bytes.')
+param uploadSessionMaxBytes int = 500 * 1024 * 1024
+@description('Optional shared secret broker<->sandbox file-inbox. Empty = rely on VNet isolation only.')
+@secure()
+param sandboxInboxToken string = ''
+
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = if (!empty(acrName)) {
   name: acrName
 }
@@ -61,10 +71,18 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
           name: 'broker-session-secret'
           value: brokerSessionSecret
         }
+        {
+          name: 'sandbox-inbox-token'
+          value: sandboxInboxToken
+        }
       ] : [
         {
           name: 'broker-session-secret'
           value: brokerSessionSecret
+        }
+        {
+          name: 'sandbox-inbox-token'
+          value: sandboxInboxToken
         }
       ]
       registries: useAcr ? [
@@ -114,6 +132,11 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'SESSION_IDLE_TIMEOUT_SECONDS', value: '600' }
             { name: 'BROKER_LOG_LEVEL', value: 'INFO' }
             { name: 'BROKER_SESSION_SECRET', secretRef: 'broker-session-secret' }
+            { name: 'UPLOAD_ENABLED', value: uploadEnabled ? 'true' : 'false' }
+            { name: 'UPLOAD_MAX_BYTES', value: string(uploadMaxBytes) }
+            { name: 'UPLOAD_SESSION_MAX_BYTES', value: string(uploadSessionMaxBytes) }
+            { name: 'SANDBOX_INBOX_PORT', value: '6902' }
+            { name: 'SANDBOX_INBOX_TOKEN', secretRef: 'sandbox-inbox-token' }
           ]
           probes: [
             {
