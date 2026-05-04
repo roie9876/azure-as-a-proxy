@@ -267,8 +267,15 @@ async function onPick(name) {
     const r = await fetch(`${INBOX}/file/${encodeURIComponent(name)}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const blob = await r.blob();
-    const file = new File([blob], name, {
-      type: blob.type || "application/octet-stream",
+    // Pick the best MIME we can. The SaaS's preview/validation keys off
+    // file.type, so 'application/octet-stream' breaks PDF preview etc.
+    // Order: server-provided -> extension lookup -> octet-stream.
+    let mime = blob.type;
+    if (!mime || mime === "application/octet-stream") {
+      mime = guessMime(name);
+    }
+    const file = new File([blob.slice(0, blob.size, mime)], name, {
+      type: mime,
       lastModified: Date.now(),
     });
     if (!input) {
@@ -287,4 +294,49 @@ async function onPick(name) {
       hint.className = "cl-err";
     }
   }
+}
+
+// Minimal extension -> MIME map; covers the formats users actually attach.
+const MIME_BY_EXT = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  txt: "text/plain",
+  log: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  tsv: "text/tab-separated-values",
+  json: "application/json",
+  xml: "application/xml",
+  html: "text/html",
+  htm: "text/html",
+  yml: "application/x-yaml",
+  yaml: "application/x-yaml",
+  zip: "application/zip",
+  gz: "application/gzip",
+  tar: "application/x-tar",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+};
+
+function guessMime(name) {
+  const i = name.lastIndexOf(".");
+  if (i < 0) return "application/octet-stream";
+  const ext = name.slice(i + 1).toLowerCase();
+  return MIME_BY_EXT[ext] || "application/octet-stream";
 }

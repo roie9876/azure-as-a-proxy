@@ -106,14 +106,22 @@ class Handler(BaseHTTPRequestHandler):
             if not self._is_localhost():
                 return self._send_json(HTTPStatus.FORBIDDEN, {"error": "localhost only"})
             from urllib.parse import unquote
+            import mimetypes
             raw = unquote(self.path[len("/file/"):])
             name = _safe_basename(raw)
             target = UPLOAD_DIR / name
             if not target.is_file():
                 return self._send_json(HTTPStatus.NOT_FOUND, {"error": "no such file"})
             size = target.stat().st_size
+            # Guess MIME from extension (case-insensitive). The SaaS's inline
+            # preview (e.g. PDF viewer) keys off Content-Type, so handing it
+            # 'application/octet-stream' breaks preview even though the bytes
+            # are correct.
+            mime, _ = mimetypes.guess_type(name)
+            if not mime:
+                mime = "application/octet-stream"
             self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(size))
             self.send_header("Content-Disposition", f'attachment; filename="{name}"')
             self.send_header("Cache-Control", "no-store")
