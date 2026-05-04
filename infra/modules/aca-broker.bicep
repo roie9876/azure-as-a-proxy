@@ -25,10 +25,16 @@ param insecureSaas string = '0'
 @description('ACR name (empty = no creds, image must be public).')
 param acrName string = ''
 
-@description('Min replicas.')
-param minReplicas int = 2
-@description('Max replicas.')
-param maxReplicas int = 5
+// IMPORTANT: broker keeps per-user sandbox allocations and the warm pool in
+// process memory (sessions.py module-level dicts). Running >1 replica causes a
+// split-brain where Front Door round-robins requests and replica B doesn't see
+// the sandbox allocated by replica A -> 409 "no sandbox; visit /session first"
+// on /vnc.html, /websockify, /upload. Pin to 1 until session state is moved
+// to a shared store (Redis/Cosmos) or sticky sessions are added.
+@description('Min replicas. Keep at 1 until broker session state is externalized.')
+param minReplicas int = 1
+@description('Max replicas. Keep at 1 until broker session state is externalized.')
+param maxReplicas int = 1
 
 @description('Stable secret used by the broker to sign the cloak_session routing cookie. Defaults to a deployment-time GUID; set explicitly to keep cookies valid across redeploys.')
 @secure()
