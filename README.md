@@ -172,17 +172,138 @@ The cloaking promise is **network/DOM/storage layer**, not visual.
 
 ---
 
-## 5. Constraints — what this design does **NOT** solve
+## 5. File upload — how a user attaches a file to the SaaS
+
+A real SaaS workflow eventually needs the user to attach a file. The cloak gives the user a streamed view of Chromium running inside the sandbox, but:
+
+- The user has **no shell** in the sandbox, no DevTools, no clipboard bridge, no file manager.
+- The sandbox filesystem is empty on every fresh session — `~/uploads/` is created at boot and the rest of `$HOME` is scrubbed (`Desktop`, `Documents`, `Downloads`, `Music`, `Pictures`, `Public`, `Templates`, `Videos` are all deleted) and `chmod 700`.
+- We cannot let Chromium pop the native GTK file dialog, because that dialog is rendered **inside the streamed framebuffer** — and a GTK file picker shows the home directory tree, the OS theme, the distro, and arguably leaks "this is a Linux sandbox", not "this is the SaaS".
+
+So the upload path is split in two halves: **(a) bytes** travel out-of-band through the broker, never via the picker; **(b) the picker UI** is replaced with an in-page modal driven by a bundled Chromium extension. Together they let the user attach files from their own laptop without ever seeing a desktop, and without giving the sandbox internet ingress.
+
+### 5.1 End-to-end flow
+
+```
+[user laptop]                                                 [Azure]
+  │                                                              │
+  │  1. multipart POST /upload                                   │
+  │     Cookie: cloak_session=…                                  │
+  │ ──────────────────────────────────────────────────────────►  │
+  │                                                              │
+  │                                       Front Door + WAF       │
+  │                                              │               │
+  │                                              ▼               │
+  │                                        Session Broker        │
+  │                                   (FastAPI on ACA, 1 replica)│
+  │                                              │               │
+  │                                  validate size / MIME / quota│
+  │                                  hash sha256, audit log      │
+  │                                              │               │
+  │                                              ▼               │
+  │                              POST http://<sandbox>:6902/inbox│
+  │                              X-Inbox-Token: <shared secret>  │
+  │                              (over the VNet, never via FD)   │
+  │                                              │               │
+  │                                              ▼               │
+  │                                    sandbox file-inbox.py     │
+  │                                    sanitize filename         │
+  │                                    atomic write             │
+  │                                    ~/uploads/<name>          │
+  │                                                              │
+  │  2. user clicks the SaaS's <input type="file"> in the        │
+  │     streamed Chromium                                        │
+  │                                              │               │
+  │                                              ▼               │
+  │                              cloak-picker extension hijacks  │
+  │                              the click *before* Chromium     │
+  │                              opens the GTK dialog            │
+  │                                              │               │
+  │                                              ▼               │
+  │                              GET http://127.0.0.1:6902/list  │
+  │                              → in-page modal lists files     │
+  │                                                              │
+  │  3. user picks a file in the modal                           │
+  │                                              │               │
+  │                                              ▼               │
+  │                              GET http://127.0.0.1:6902/file/X│
+  │                              → blob, attached via DataTransfer│
+  │                              to the original <input>; Saa S  │
+  │                              sees a normal "user picked file"│
+  │                              event                           │
+```
+
+Bytes flow **left → right only**. Chromium policy `DownloadRestrictions=3` blocks every download channel inside the sandbox, so a malicious SaaS cannot exfiltrate data back to the user's laptop through the picker channel.
+
+### 5.2 The two halves
+
+**Half A — getting the bytes into the sandbox.** [`broker/app/upload.py`](broker/app/upload.py) handles `POST /upload`. It is authenticated by the `cloak_session` cookie (the same routing cookie that scopes the noVNC stream), checks the session has a claimed sandbox, validates per-file size (`UPLOAD_MAX_BYTES`, default 100 MB), per-session aggregate (`UPLOAD_SESSION_MAX_BYTES`, default 500 MB), and the user-declared MIME against `UPLOAD_MIME_ALLOWLIST`. It then forwards the multipart body to `http://<sandbox-private-ip>:6902/inbox` with a shared-secret `X-Inbox-Token` header. The sandbox runs [`sandbox/file-inbox.py`](sandbox/file-inbox.py) — a stdlib `ThreadingHTTPServer` that sanitizes the filename (`[^A-Za-z0-9._-]` → `_`, max 200 chars, no leading dot), writes to a temp file, atomically renames into `~/uploads/`, and emits a `sha256` line so the broker and sandbox audit trails can be cross-referenced.
+
+**Half B — letting the user pick that file inside the streamed Chromium.** Without intervention, when the SaaS calls `<input type="file">.click()`, Chromium opens the GTK file dialog inside Xvfb — that dialog is in the streamed framebuffer and would show home directories, file timestamps, the OS theme, etc. Instead we ship a Manifest-V3 extension at [`sandbox/picker-extension/`](sandbox/picker-extension/), bundled into the sandbox image at `/opt/cloak-picker` and loaded via Chromium flags `--load-extension=/opt/cloak-picker --disable-extensions-except=/opt/cloak-picker`. The extension's `content.js` runs at `document_start` on every frame and:
+
+1. **Captures `<input type="file">` clicks** in the capture phase (also `<label for="…">` and 4-level wrapped variants) and calls `preventDefault()` / `stopImmediatePropagation()` before Chromium can open the GTK dialog.
+2. Patches `HTMLInputElement.prototype.showPicker` so JS-driven pickers are also intercepted.
+3. **Renders an in-page modal** (z-index `2147483647`, inline-styled, scoped via `#cloak-picker-modal`) listing the contents of `~/uploads` by calling `GET http://127.0.0.1:6902/list`. That endpoint is gated to `127.0.0.1`/`::1` only — the same `file-inbox.py` process that accepts uploads from the broker over the VNet refuses listings to anyone but localhost.
+4. When the user picks a name, the extension calls `GET http://127.0.0.1:6902/file/<name>`, gets a `Blob`, fixes its MIME (server-side `mimetypes.guess_type` plus a client-side extension table for pdf/png/docx/xlsx/etc.), wraps it in a `File` with the corrected `type`, attaches it to the original `<input>` via `DataTransfer`, and dispatches `input` and `change` events. The SaaS sees a perfectly ordinary file pick and renders its preview / starts its upload normally.
+
+### 5.3 Defence-in-depth — why the desktop is unreachable even if the extension fails
+
+If the extension ever crashes or is removed, the SaaS's `<input>` falls back to the GTK dialog — but that dialog now opens in a hardened home directory:
+
+- `entrypoint.sh` deletes the standard XDG dirs (`Desktop`, `Documents`, `Downloads`, `Music`, `Pictures`, `Public`, `Templates`, `Videos`) on every container start.
+- `chmod 700 $HOME` so the dialog can't traverse sideways.
+- `~/.config/gtk-3.0/bookmarks` is rewritten to point only at `~/uploads`.
+- Chromium managed policy (`/etc/chromium/policies/managed/cloak.json`) keeps `ExtensionInstallSources=[]` so no extra extension can be installed at runtime.
+
+### 5.4 Network exposure of `file-inbox`
+
+| Endpoint                          | Listens on             | Authorised callers                                         |
+|-----------------------------------|------------------------|------------------------------------------------------------|
+| `POST /inbox` (broker → sandbox)  | `0.0.0.0:6902`         | Broker only, via VNet IP, with shared-secret `X-Inbox-Token`. The sandbox subnet NSG blocks every other source. |
+| `GET /list`                       | `0.0.0.0:6902`         | **127.0.0.1 / ::1 only.** Enforced inside `file-inbox.py`; non-loopback IPs get `403`. |
+| `GET /file/<name>`                | `0.0.0.0:6902`         | Same — loopback only. Used by the extension running inside the sandbox's own Chromium. |
+| `GET /healthz`                    | `0.0.0.0:6902`         | Anyone on the VNet (used by the broker readiness probe). |
+
+The sandbox has no public IP and the subnet NSG denies all inbound except from the broker's ACA env subnet, so port `6902` is unreachable from the public Internet regardless of the listen address.
+
+### 5.5 Limits & failure modes
+
+| Limit                       | Default                  | Knob                                       |
+|-----------------------------|--------------------------|--------------------------------------------|
+| Per-file size               | 100 MB                   | `UPLOAD_MAX_BYTES`                         |
+| Per-session aggregate       | 500 MB                   | `UPLOAD_SESSION_MAX_BYTES`                 |
+| MIME allowlist              | pdf, docx, xlsx, png/jpeg/webp/gif, txt/csv/md, zip, json/xml | `UPLOAD_MIME_ALLOWLIST` (comma-sep)        |
+| Filename sanitization       | `[^A-Za-z0-9._-]` → `_`, max 200 chars, no leading dot | hard-coded in [`sandbox/file-inbox.py`](sandbox/file-inbox.py) |
+| Sandbox inbox auth          | shared-secret `X-Inbox-Token` | `SANDBOX_INBOX_TOKEN` (broker) + `INBOX_TOKEN` (sandbox env) |
+| Front Door body inspection  | bodies > 128 KB pass through without WAF body inspection (Microsoft_DefaultRuleSet 2.1 default) | adjust `policySettings.requestBodyCheck` if needed |
+
+The 100 MB cap matches the practical Front Door / ACA ingress body limit; raising it requires a different ingest path (e.g. presigned blob → SAS URL pre-fetched inside the sandbox).
+
+The aggregate quota lives in-memory per `browserId` on the broker. It resets when the session is destroyed (logout, idle, sandbox eviction). With the broker pinned at one replica this is fine; once we externalise session state to lift the multi-replica pin (§2.2), this dict moves to Redis as well.
+
+A failed upload keeps the sandbox alive — the broker returns `4xx`/`5xx` to the user's browser and the next attempt is independent. A successful upload appears on the broker's stdout as one structured line:
+
+```
+upload accepted browser=4f1c2a8b sandbox=sbx-1739293021-9f3a name=contract.pdf mime=application/pdf size=412317 sha256=f1a3…
+```
+
+Both sides log the same `sha256`, so cross-checking broker logs against the sandbox's `file-inbox.log` proves the bytes travelled end-to-end.
+
+Full API reference, error codes, threat-model notes (MIME spoofing, AV, DoS, cross-tenant fan-out): [docs/UPLOAD.md](docs/UPLOAD.md).
+
+---
+
+## 6. Constraints — what this design does **NOT** solve
 
 This list must be reviewed with the customer. If any of these become must-haves, the design changes (or becomes infeasible).
 
-### 5.1 Visual / pixel-level cloaking
+### 6.1 Visual / pixel-level cloaking
 - ❌ The user **will see the SaaS's UI** — branding, logos, color scheme, layout, data.
 - ❌ A screenshot or screen recording captures the SaaS UI.
 - ❌ OCR on a screenshot can extract any text rendered on screen, including a tenant name displayed by the SaaS.
 - **Why:** No technology can render a SaaS's pages to a user *and* hide what those pages look like. The only solutions are (a) get an API from the SaaS and build a custom UI on top — separate project, separate path; or (b) accept the limitation.
 
-### 5.2 SaaS features incompatible with browser-in-a-browser
+### 6.2 SaaS features incompatible with browser-in-a-browser
 
 The sandbox runs a real Chromium against the real SaaS, so cookies, third-party cookies, Service Workers, OAuth redirects, and standard MFA codes all work. The features that genuinely break are the ones that bind to **the user's local OS or device** — those signals never leave the user's laptop, so the SaaS-side check fails.
 
@@ -200,7 +321,7 @@ The sandbox runs a real Chromium against the real SaaS, so cookies, third-party 
 
 > **Action required from customer:** Confirm with a 30-min PoC on the actual target SaaS *before* committing to the full build. If the target SaaS depends on any row above for a critical flow, revisit.
 
-### 5.3 Adversary capability ceiling
+### 6.3 Adversary capability ceiling
 
 | Adversary capability | Defended? |
 |---|---|
@@ -216,7 +337,7 @@ The sandbox runs a real Chromium against the real SaaS, so cookies, third-party 
 | Sandbox compromise & lateral movement to other tenants | ✅ — Hyper-V isolation per session, no shared state, no persistent volume; this is the explicit fix for the customer's previous RBI bleed bug |
 | Compromise of the egress NAT IP reputation | ⚠️ — if SaaS rate-limits or flags the IP, all 50 users impacted simultaneously; mitigation = `/29` Public IP Prefix + rotation |
 
-### 5.4 Operational constraints
+### 6.4 Operational constraints
 - ❌ No persistent per-user profile inside the sandbox — by design. Means every session starts fresh, with re-login, re-MFA, re-device-trust challenges. **Adding persistence reintroduces the cross-user contamination risk** the customer's old RBI had. Do not relax this.
 - ❌ User cannot bookmark deep-links into the SaaS — only the cloak's entry URL.
 - ❌ No download of SaaS-issued OAuth tokens / API keys to the user's device — these would be visible inside the sandbox browser only.
@@ -224,14 +345,14 @@ The sandbox runs a real Chromium against the real SaaS, so cookies, third-party 
 - ⚠️ ACA Dynamic Sessions custom-container pools — verify regional availability and image-size limits at PoC time. Service is relatively new.
 - ⚠️ Front Door + WebSocket through Private Link to ACA internal ingress — confirm WS upgrade behavior at PoC. If problematic, fall back to App Gateway v2 in front of ACA (Front Door still preferred for public surface; AppGW only if WS is fragile).
 
-### 5.5 Compliance / legal
+### 6.5 Compliance / legal
 - ❌ This design does not establish whether using the SaaS via RBI complies with the SaaS's ToS for *all* features. Customer asserted "ToS allows it" — get this in writing, ideally per-feature.
 - ❌ Data-residency analysis is **not done**. SaaS traffic egresses from the chosen Azure region; if data is subject to a residency constraint that forbids that region, this design violates it. Customer must confirm.
 - ❌ Audit trail of *what users did inside the SaaS* is limited to network metadata (Front Door logs, NAT GW flows). **Session recording** of the rendered pixels can be added (Kasm and similar support it) but adds storage cost and retention obligations.
 
 ---
 
-## 6. Out-of-scope follow-ups (if customer requirements grow)
+## 7. Out-of-scope follow-ups (if customer requirements grow)
 
 | If customer later asks for… | New design path |
 |---|---|
@@ -241,7 +362,7 @@ The sandbox runs a real Chromium against the real SaaS, so cookies, third-party 
 
 ---
 
-## 7. Files in this folder
+## 8. Files in this folder
 
 | File | Purpose |
 |---|---|
