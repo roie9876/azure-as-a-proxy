@@ -29,7 +29,7 @@ The topology above implements **Remote Browser Isolation (RBI)** on Azure-native
 |---|---|---|
 | Public surface | **Azure Front Door Premium** + WAF + DDoS Std | TLS termination at the FD endpoint (custom domain in production), your cert, anycast, WAF managed rules + **custom IP-allowlist rule** (see §4.3) |
 | Session controller | **Session Broker** (Azure Container Apps, FastAPI) | Mints a per-browser routing cookie, allocates a sandbox, proxies WebSocket → noVNC. **No user authentication is performed here** — the SaaS itself authenticates the user inside the sandbox. |
-| Per-browser sandbox | **Azure Container Instances** (custom kiosk image in our ACR) | One ACI per browser, private-IP-only on a delegated subnet, destroyed on logout. Custom 250 MB image: Debian 12-slim + Xvfb + fluxbox + x11vnc + websockify + bundled noVNC + Chromium `--kiosk --app=$SAAS_URL` |
+| Per-browser sandbox | **Azure Container Instances** (custom kiosk image in our ACR) | One ACI per browser, private-IP-only on a delegated subnet, destroyed on logout. Custom kiosk image: Debian 12-slim + Xvfb + fluxbox + x11vnc + websockify + bundled noVNC + Chromium `--kiosk --app=$SAAS_URL` + `file-inbox.py` (port 6902, broker-only) + bundled Cloak picker extension that hijacks `<input type=file>` so no GTK desktop is ever rendered |
 | Egress | **NAT Gateway + Standard Public IP** (or `/29` Public IP Prefix) | Stable Azure egress IP visible to the SaaS |
 | DNS | **Azure DNS Private Resolver** | Region-consistent DNS resolution for the sandbox subnet |
 | Observability | **Log Analytics** + Front Door / ACA diagnostics | Audit + troubleshooting |
@@ -78,7 +78,7 @@ The broker fills that gap. Without it, there is no per-browser mapping, no warm 
 |---|---|
 | Long-lived WebSocket per user (pixel stream) | ACA supports WebSockets natively; Functions handle them poorly |
 | Private VNet + Private Link from Front Door | ACA internal ingress supports both |
-| Scale 2 → 5 replicas on concurrent sessions | KEDA HTTP scaler |
+| Scale 2 → 5 replicas on concurrent sessions | KEDA HTTP scaler — **currently pinned to `minReplicas=1, maxReplicas=1`** because the broker keeps `(browserId → sandbox)` mapping in process memory; running >1 replica would split-brain across Front Door's round-robin and produce 409 "no sandbox; visit /session first". Externalising the mapping (Redis / Cosmos) is the next step to lift this pin. |
 | Stateless, easy redeploy | Container image, no host to patch |
 | Cheap when idle (≈ 2 small replicas) | Per-second compute billing |
 
@@ -190,8 +190,8 @@ The sandbox runs a real Chromium against the real SaaS, so cookies, third-party 
 |---|---|
 | **WebAuthn with platform authenticator** (Touch ID, Windows Hello, OS-bound passkeys, Smart Card) | The credential lives on the user's laptop; the WebAuthn request is issued by the sandbox's Chromium, with a different origin/RP-ID and no path to the user's TPM/Secure Enclave. **Mitigation:** use a roaming USB security key forwarded into the sandbox, an authenticator-app TOTP, or push-based MFA — all of these work fine |
 | **Conditional Access / device-trust policies** that require a managed device, a corp certificate, or a device-compliance signal | The sandbox is not the user's device. **Mitigation:** scope Conditional Access to the egress NAT IP / a service principal, or accept that users will be re-prompted for MFA each session |
-| **Apps requiring browser extensions** (PGP, password managers, custom plugins) | The kiosk Chromium ships with no extensions and we keep it that way to preserve a uniform fingerprint |
-| **OS integrations** (smartcard middleware, certificate stores, native messaging hosts) | Sandbox OS is not the user's OS. File pickers up to 100 MB/file are supported via the broker-mediated `/upload` endpoint — see [docs/UPLOAD.md](docs/UPLOAD.md) |
+| **Apps requiring browser extensions** (PGP, password managers, custom plugins) | The kiosk Chromium ships with one bundled internal extension (`/opt/cloak-picker`) loaded via `--load-extension` and locked down with `--disable-extensions-except`. No user- or web-installable extensions; managed-policy `ExtensionInstallSources=[]` blocks ad-hoc installs. Fingerprint stays uniform. |
+| **OS integrations** (smartcard middleware, certificate stores, native messaging hosts) | Sandbox OS is not the user's OS. File uploads up to 100 MB/file flow user → broker `/upload` → sandbox `file-inbox` (`:6902`, VNet-only) → `~/uploads/`; the bundled picker extension intercepts `<input type=file>` clicks and renders an in-page modal listing those files, so the GTK desktop is never streamed. See [docs/UPLOAD.md](docs/UPLOAD.md). |
 | **"Remember this device" cookies / persistent device trust** | Sandbox is destroyed at logout — fresh fingerprint every session. Expect frequent re-verification challenges |
 | **Latency-sensitive or graphics-heavy apps** (video editors, 3D, real-time games, smooth-scroll dashboards with 30+ FPS animation) | RBI adds 60–100 ms input lag; not for these workloads |
 | **Aggressive bot detection** (Akamai BMP, PerimeterX, Cloudflare Bot Management) | Fresh Azure IP + uniform fingerprint per session can trip bot scoring. **Mitigation:** allowlist the NAT Gateway egress IP with the SaaS as a trusted source |
