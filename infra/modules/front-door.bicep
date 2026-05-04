@@ -85,7 +85,10 @@ resource profile 'Microsoft.Cdn/profiles@2024-02-01' = {
 
 resource endpoint 'Microsoft.Cdn/profiles/afdEndpoints@2024-02-01' = {
   parent: profile
-  name: 'ep-${namePrefix}'
+  // Endpoint name is part of the globally-unique hostname (<endpoint>-<hash>.azurefd.net),
+  // so plain 'ep-${namePrefix}' collides across subs/tenants. Suffix with a hash of the
+  // RG id to make it deterministic per deployment but globally unlikely to collide.
+  name: 'ep-${namePrefix}-${uniqueString(resourceGroup().id)}'
   location: 'Global'
   tags: tags
   properties: {
