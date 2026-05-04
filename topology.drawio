@@ -1,111 +1,133 @@
-<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.7.17 Chrome/128.0.6613.36 Electron/32.0.1 Safari/537.36" version="24.7.17">
-  <diagram id="path-a-topology" name="Path A — RBI Cloak">
-    <mxGraphModel dx="1674" dy="789" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+<mxfile host="Electron" agent="Mozilla/5.0" version="24.7.17">
+  <diagram id="topology" name="Path A — RBI Cloak (no broker auth)">
+    <mxGraphModel dx="1674" dy="789" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="980" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" value="Path A — Hide Network Identity of an Unknown SaaS (RBI on Azure PaaS)" style="text;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#1F3864;fontFamily=Helvetica;" parent="1" vertex="1">
+
+        <mxCell id="title" value="Path A — Hide Network Identity of an Unknown SaaS (RBI on Azure PaaS)" style="text;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#1F3864;fontFamily=Helvetica;" vertex="1" parent="1">
           <mxGeometry x="120" y="20" width="1360" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Per-browser ACI sandbox (custom kiosk image) · noVNC pixel stream to user · SaaS HTTP responses never leave the sandbox" style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontColor=#5A6678;fontFamily=Helvetica;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="No broker auth · The SaaS authenticates the user inside the per-browser ACI sandbox · Front Door WAF restricts who can reach the URL" style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontColor=#5A6678;fontFamily=Helvetica;" vertex="1" parent="1">
           <mxGeometry x="120" y="52" width="1360" height="22" as="geometry" />
         </mxCell>
-        <mxCell id="corpZone" value="Corporate Network" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#D6A419;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#7A5A00;spacingTop=10;" parent="1" vertex="1">
-          <mxGeometry x="60" y="110" width="280" height="780" as="geometry" />
+
+        <!-- Corporate / user zone -->
+        <mxCell id="corpZone" value="Corporate Network (allowlisted public IPs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#D6A419;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#7A5A00;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="100" width="280" height="780" as="geometry" />
         </mxCell>
-        <mxCell id="userIcon" value="" style="sketch=0;pointerEvents=1;shadow=0;dashed=0;html=1;strokeColor=none;fillColor=#3F51B5;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;outlineConnect=0;align=center;shape=mxgraph.office.users.on_premises_user;" vertex="1" parent="1">
-          <mxGeometry x="170" y="200" width="60" height="72" as="geometry" />
+        <mxCell id="userIcon" value="" style="sketch=0;pointerEvents=1;shadow=0;dashed=0;html=1;strokeColor=none;fillColor=#3F51B5;outlineConnect=0;align=center;shape=mxgraph.office.users.on_premises_user;" vertex="1" parent="1">
+          <mxGeometry x="170" y="190" width="60" height="72" as="geometry" />
         </mxCell>
         <mxCell id="userLabel" value="End User&#xa;Corporate laptop" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#1F3864;" vertex="1" parent="1">
-          <mxGeometry x="100" y="280" width="200" height="32" as="geometry" />
+          <mxGeometry x="100" y="270" width="200" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="userBrowser" value="Chromium browser&#xa;https://ep-cloak-….azurefd.net&#xa;(custom domain in prod)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9E9E9E;fontSize=11;fontFamily=Helvetica;align=center;" vertex="1" parent="1">
-          <mxGeometry x="100" y="335" width="200" height="60" as="geometry" />
+        <mxCell id="userBrowser" value="Chromium browser&#xa;https://ep-cloak-….azurefd.net" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9E9E9E;fontSize=11;fontFamily=Helvetica;align=center;" vertex="1" parent="1">
+          <mxGeometry x="100" y="320" width="200" height="50" as="geometry" />
         </mxCell>
         <mxCell id="userSeesBox" value="What the user can see" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D6A419;dashed=1;verticalAlign=top;fontStyle=1;fontSize=11;fontFamily=Helvetica;fontColor=#7A5A00;spacingTop=8;align=center;" vertex="1" parent="1">
-          <mxGeometry x="80" y="430" width="240" height="200" as="geometry" />
+          <mxGeometry x="80" y="410" width="240" height="220" as="geometry" />
         </mxCell>
         <mxCell id="userSeesList" value="✓ TLS to Front Door (MS cert)&#xa;✓ WSS /websockify to FD only&#xa;✓ noVNC client + 1 canvas&#xa;✓ 0/77 HAR entries hit SaaS&#xa;&#xa;✗ No SaaS URL / hostname&#xa;✗ No tenant ID / GUIDs&#xa;✗ No SaaS cookies / DOM / JSON&#xa;✗ No server / x-powered-by /&#xa;   x-nextjs-* / etag headers" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#3C3C3C;spacingLeft=14;" vertex="1" parent="1">
-          <mxGeometry x="92" y="458" width="220" height="170" as="geometry" />
+          <mxGeometry x="92" y="438" width="220" height="190" as="geometry" />
         </mxCell>
-        <mxCell id="userCount" value="≈ X users (e.g. 50)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#D6A419;fontSize=11;fontFamily=Helvetica;fontStyle=1;fontColor=#7A5A00;align=center;" vertex="1" parent="1">
-          <mxGeometry x="120" y="660" width="160" height="30" as="geometry" />
+        <mxCell id="ipNote" value="Only allowlisted public IPs reach the FD URL — everything else is WAF-blocked at the edge." style="text;html=1;align=center;fontSize=10;fontStyle=2;fontFamily=Helvetica;fontColor=#7A5A00;" vertex="1" parent="1">
+          <mxGeometry x="80" y="650" width="240" height="48" as="geometry" />
         </mxCell>
-        <mxCell id="azureZone" value="Azure  —  egress region (non-user region)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#0078D4;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#0F4C81;spacingTop=10;" parent="1" vertex="1">
-          <mxGeometry x="380" y="110" width="980" height="780" as="geometry" />
+
+        <!-- Azure zone -->
+        <mxCell id="azureZone" value="Azure  —  egress region (non-user region)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#0078D4;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#0F4C81;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="380" y="100" width="980" height="780" as="geometry" />
         </mxCell>
+
+        <!-- Front Door + WAF -->
         <mxCell id="afdIcon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/networking/Front_Doors.svg;" vertex="1" parent="1">
-          <mxGeometry x="700" y="160" width="68" height="60" as="geometry" />
+          <mxGeometry x="700" y="150" width="68" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="afdLabel" value="Azure Front Door Premium + WAF + DDoS Std" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
-          <mxGeometry x="540" y="225" width="390" height="20" as="geometry" />
+        <mxCell id="afdLabel" value="Azure Front Door Premium + WAF" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
+          <mxGeometry x="540" y="215" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="afdSub" value="Custom domain · TLS · anycast · WAF policy" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
-          <mxGeometry x="540" y="245" width="390" height="18" as="geometry" />
+        <mxCell id="afdSub" value="WAF custom rule: Allow only listed source IPs · Block all else" style="text;html=1;align=center;fontSize=10;fontStyle=2;fontFamily=Helvetica;fontColor=#C62828;" vertex="1" parent="1">
+          <mxGeometry x="540" y="235" width="390" height="18" as="geometry" />
         </mxCell>
-        <mxCell id="acaEnv" value="Azure Container Apps environment   —   private VNet, internal-only ingress" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;strokeWidth=1;dashed=1;verticalAlign=top;fontStyle=1;fontSize=12;fontFamily=Helvetica;fontColor=#0F4C81;spacingTop=10;" parent="1" vertex="1">
-          <mxGeometry x="410" y="300" width="920" height="450" as="geometry" />
+        <mxCell id="afdSub2" value="Custom domain · TLS · anycast · Bot Manager · DDoS Std" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="540" y="252" width="390" height="18" as="geometry" />
         </mxCell>
+
+        <!-- ACA env -->
+        <mxCell id="acaEnv" value="Azure Container Apps environment   —   private VNet, internal-only ingress, public network access disabled, FD shared Private Link" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;strokeWidth=1;dashed=1;verticalAlign=top;fontStyle=1;fontSize=12;fontFamily=Helvetica;fontColor=#0F4C81;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="410" y="290" width="920" height="450" as="geometry" />
+        </mxCell>
+
+        <!-- Broker -->
         <mxCell id="brokerIcon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/other/Worker_Container_App.svg;" vertex="1" parent="1">
-          <mxGeometry x="476" y="350" width="68" height="66" as="geometry" />
+          <mxGeometry x="476" y="340" width="68" height="66" as="geometry" />
         </mxCell>
         <mxCell id="brokerLabel" value="Session Broker" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
-          <mxGeometry x="430" y="420" width="160" height="20" as="geometry" />
+          <mxGeometry x="430" y="410" width="160" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="brokerSub" value="Container App · 2..5 replicas" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
-          <mxGeometry x="430" y="440" width="160" height="16" as="geometry" />
+        <mxCell id="brokerSub" value="Container App · 2..5 replicas&#xa;HTTP-concurrency autoscaler" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="430" y="430" width="160" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="brokerBullets" value="• OIDC or stub +&#xa;  cookie identity&#xa;• Warm pool (N=2)&#xa;• Allocate ACI&#xa;• Proxy /websockify" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F8E9;strokeColor=#82B366;fontSize=10;fontFamily=Helvetica;align=left;verticalAlign=top;spacingLeft=10;spacingTop=6;fontColor=#33691E;" vertex="1" parent="1">
+        <mxCell id="brokerBullets" value="• Mint cookie&#xa;  (routing key, NOT auth)&#xa;• Allocate per-browser ACI&#xa;• Warm pool (N=2)&#xa;• Proxy /websockify" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F8E9;strokeColor=#82B366;fontSize=10;fontFamily=Helvetica;align=left;verticalAlign=top;spacingLeft=10;spacingTop=6;fontColor=#33691E;" vertex="1" parent="1">
           <mxGeometry x="430" y="465" width="160" height="84" as="geometry" />
         </mxCell>
+
+        <!-- Sandboxes -->
         <mxCell id="poolBox" value="Per-browser Azure Container Instances (custom kiosk image)  —  delegated subnet, private IP only, destroyed at logout" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E59B0F;strokeWidth=1;dashed=1;verticalAlign=top;fontStyle=1;fontSize=11;fontFamily=Helvetica;fontColor=#8C5A00;spacingTop=8;" vertex="1" parent="1">
-          <mxGeometry x="640" y="340" width="660" height="310" as="geometry" />
+          <mxGeometry x="640" y="330" width="660" height="310" as="geometry" />
         </mxCell>
-        <mxCell id="sb1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" parent="1" vertex="1">
-          <mxGeometry x="660" y="385" width="190" height="155" as="geometry" />
+        <mxCell id="sb1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="375" width="190" height="180" as="geometry" />
         </mxCell>
         <mxCell id="sb1Icon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/other/Container_App_Environments.svg;" vertex="1" parent="1">
-          <mxGeometry x="721" y="395" width="68" height="68" as="geometry" />
+          <mxGeometry x="721" y="385" width="68" height="68" as="geometry" />
         </mxCell>
         <mxCell id="sb1Title" value="Sandbox · Browser A" style="text;html=1;align=center;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
-          <mxGeometry x="660" y="465" width="190" height="18" as="geometry" />
+          <mxGeometry x="660" y="455" width="190" height="18" as="geometry" />
         </mxCell>
-        <mxCell id="sb1Sub" value="Xvfb + fluxbox + x11vnc&#xa;+ websockify + noVNC&#xa;+ Chromium --kiosk&#xa;INSECURE_SAAS=1" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
-          <mxGeometry x="660" y="485" width="190" height="55" as="geometry" />
+        <mxCell id="sb1Sub" value="Xvfb + fluxbox + x11vnc&#xa;+ websockify + noVNC&#xa;+ Chromium --kiosk&#xa;&#xa;User logs into the SaaS&#xa;HERE (real auth)" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="660" y="475" width="190" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="sb2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" parent="1" vertex="1">
-          <mxGeometry x="880" y="385" width="190" height="155" as="geometry" />
+
+        <mxCell id="sb2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="880" y="375" width="190" height="180" as="geometry" />
         </mxCell>
         <mxCell id="sb2Icon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/other/Container_App_Environments.svg;" vertex="1" parent="1">
-          <mxGeometry x="941" y="395" width="68" height="68" as="geometry" />
+          <mxGeometry x="941" y="385" width="68" height="68" as="geometry" />
         </mxCell>
         <mxCell id="sb2Title" value="Sandbox · Browser B" style="text;html=1;align=center;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
-          <mxGeometry x="880" y="465" width="190" height="18" as="geometry" />
+          <mxGeometry x="880" y="455" width="190" height="18" as="geometry" />
         </mxCell>
-        <mxCell id="sb2Sub" value="Xvfb + x11vnc + websockify&#xa;+ noVNC + Chromium kiosk&#xa;cloak_browser_id cookie→sub" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
-          <mxGeometry x="880" y="485" width="190" height="55" as="geometry" />
+        <mxCell id="sb2Sub" value="Independent Chromium&#xa;Independent SaaS session&#xa;cloak_browser_id cookie&#xa;routes the user to&#xa;THIS ACI (not A's)" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="880" y="475" width="190" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="sbN" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;dashed=1;" parent="1" vertex="1">
-          <mxGeometry x="1100" y="385" width="190" height="155" as="geometry" />
+
+        <mxCell id="sbN" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="375" width="190" height="180" as="geometry" />
         </mxCell>
         <mxCell id="sbNIcon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/other/Container_App_Environments.svg;opacity=50;" vertex="1" parent="1">
-          <mxGeometry x="1161" y="395" width="68" height="68" as="geometry" />
+          <mxGeometry x="1161" y="385" width="68" height="68" as="geometry" />
         </mxCell>
         <mxCell id="sbNTitle" value="…  Sandbox · Browser N" style="text;html=1;align=center;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
-          <mxGeometry x="1100" y="465" width="190" height="18" as="geometry" />
+          <mxGeometry x="1100" y="455" width="190" height="18" as="geometry" />
         </mxCell>
-        <mxCell id="sbNSub" value="warm pool + on-demand&#xa;1 ACI per browser" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
-          <mxGeometry x="1100" y="485" width="190" height="30" as="geometry" />
+        <mxCell id="sbNSub" value="Warm pool + on-demand&#xa;1 ACI per browser&#xa;Scales horizontally" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="475" width="190" height="50" as="geometry" />
         </mxCell>
+
+        <!-- Hardening text -->
         <mxCell id="hardenBox" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;" vertex="1" parent="1">
-          <mxGeometry x="660" y="555" width="630" height="84" as="geometry" />
+          <mxGeometry x="660" y="565" width="630" height="68" as="geometry" />
         </mxCell>
         <mxCell id="hardenTitle" value="Per-sandbox hardening" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
-          <mxGeometry x="660" y="555" width="630" height="20" as="geometry" />
+          <mxGeometry x="660" y="565" width="630" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="hardenList" value="• No persistent volume · destroyed on logout / idle / WS close&#xa;• x11vnc -nopw -localhost (no VNC password on the wire)&#xa;• Outbound 443 only via NAT GW · Chromium kiosk: no URL bar, no devtools, INSECURE_SAAS=1 scoped to $SAAS_URL" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=4;" vertex="1" parent="1">
-          <mxGeometry x="660" y="578" width="630" height="58" as="geometry" />
+        <mxCell id="hardenList" value="• No persistent volume · destroyed on logout / idle / WS close      • x11vnc -nopw -localhost (no VNC password on the wire)&#xa;• Outbound 443 only via NAT GW · Chromium kiosk: no URL bar, no devtools, no extensions" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="660" y="585" width="630" height="44" as="geometry" />
         </mxCell>
+
+        <!-- NAT -->
         <mxCell id="natIcon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/networking/NAT.svg;" vertex="1" parent="1">
           <mxGeometry x="916" y="690" width="68" height="68" as="geometry" />
         </mxCell>
@@ -115,109 +137,84 @@
         <mxCell id="natSub" value="Stable Azure-owned egress IP   ·   /29 prefix optional" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
           <mxGeometry x="780" y="780" width="340" height="18" as="geometry" />
         </mxCell>
+
+        <!-- DNS -->
         <mxCell id="dnsIcon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/networking/DNS_Private_Resolver.svg;" vertex="1" parent="1">
           <mxGeometry x="1186" y="790" width="68" height="60" as="geometry" />
         </mxCell>
         <mxCell id="dnsLabel" value="DNS Private Resolver" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
           <mxGeometry x="1140" y="852" width="170" height="16" as="geometry" />
         </mxCell>
-        <mxCell id="kvIcon" value="" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/security/Key_Vaults.svg;" vertex="1" parent="1">
-          <mxGeometry x="476" y="690" width="68" height="68" as="geometry" />
-        </mxCell>
-        <mxCell id="kvLabel" value="Key Vault" style="text;html=1;align=center;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
-          <mxGeometry x="430" y="760" width="160" height="18" as="geometry" />
-        </mxCell>
-        <mxCell id="kvSub" value="OIDC secret · signing keys" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
-          <mxGeometry x="430" y="778" width="160" height="16" as="geometry" />
-        </mxCell>
+
+        <!-- Public Internet zone -->
         <mxCell id="extZone" value="Public Internet" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#9E9E9E;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#616161;spacingTop=10;" vertex="1" parent="1">
-          <mxGeometry x="1400" y="110" width="200" height="780" as="geometry" />
-        </mxCell>
-        <mxCell id="idpBox" value="External IdP&#xa;(or PoC stub)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#7A1212;align=center;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
-          <mxGeometry x="1430" y="170" width="140" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="idpSub" value="Auth0 · Okta&#xa;Keycloak…&#xa;or cookie stub:&#xa;cloak_browser_id" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontFamily=Helvetica;fontColor=#7A1212;" vertex="1" parent="1">
-          <mxGeometry x="1430" y="200" width="140" height="60" as="geometry" />
+          <mxGeometry x="1400" y="100" width="200" height="780" as="geometry" />
         </mxCell>
         <mxCell id="saasBox" value="Unknown SaaS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE7F6;strokeColor=#5E35B1;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#311B92;align=center;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
-          <mxGeometry x="1420" y="430" width="160" height="180" as="geometry" />
+          <mxGeometry x="1420" y="380" width="160" height="220" as="geometry" />
         </mxCell>
-        <mxCell id="saasSub" value="Real domain&#xa;Real auth flow&#xa;Real tenant ID&#xa;&#xa;Visible only INSIDE&#xa;the sandbox" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontFamily=Helvetica;fontColor=#311B92;" vertex="1" parent="1">
-          <mxGeometry x="1420" y="455" width="160" height="140" as="geometry" />
+        <mxCell id="saasSub" value="Real domain&#xa;Real auth flow&#xa;Real tenant ID&#xa;&#xa;Authenticates the user&#xa;directly (Entra/Okta/&#xa;username+password/&#xa;whatever the SaaS uses)&#xa;&#xa;Visible only INSIDE&#xa;the sandbox" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontFamily=Helvetica;fontColor=#311B92;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="405" width="160" height="180" as="geometry" />
         </mxCell>
-        <mxCell id="saasNote" value="Sees only the&#xa;Azure egress IP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5E35B1;dashed=1;fontSize=10;fontFamily=Helvetica;fontColor=#311B92;align=center;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="1430" y="630" width="140" height="44" as="geometry" />
+        <mxCell id="saasNote" value="Sees only the&#xa;Azure NAT egress IP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5E35B1;dashed=1;fontSize=10;fontFamily=Helvetica;fontColor=#311B92;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1430" y="620" width="140" height="44" as="geometry" />
         </mxCell>
-        <mxCell id="e1" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=1;" parent="1" source="userBrowser" target="afdIcon" edge="1">
+
+        <!-- Edges -->
+        <mxCell id="e1" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" parent="1" source="userBrowser" target="afdIcon" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e1lbl" value="HTTPS / WSS" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e1" vertex="1" connectable="0">
-          <mxGeometry x="-0.1" relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
+        <mxCell id="e1lbl" value="HTTPS / WSS" style="edgeLabel;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e1" vertex="1" connectable="0">
+          <mxGeometry x="-0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
         </mxCell>
-        <mxCell id="e2" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=1;" parent="1" source="afdIcon" target="brokerIcon" edge="1">
+
+        <mxCell id="e2" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;curved=1;" parent="1" source="afdIcon" target="brokerIcon" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2lbl" value="Private Link" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e2" vertex="1" connectable="0">
-          <mxGeometry x="-0.2" relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
+        <mxCell id="e2lbl" value="Private Link" style="edgeLabel;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e2" vertex="1" connectable="0">
+          <mxGeometry x="-0.2" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
         </mxCell>
-        <mxCell id="e3" style="endArrow=classic;html=1;strokeColor=#C62828;strokeWidth=2;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=1;" parent="1" source="brokerIcon" target="idpBox" edge="1">
+
+        <mxCell id="e4" style="endArrow=classic;html=1;strokeColor=#E59B0F;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" parent="1" source="brokerIcon" target="sb1" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e3lbl" value="OIDC" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#C62828;background=#FFFFFF;" parent="e3" vertex="1" connectable="0">
-          <mxGeometry x="-0.2" relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
+        <mxCell id="e4lbl" value="ARM: PUT/DELETE&#xa;containerGroup" style="edgeLabel;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#E59B0F;background=#FFFFFF;" parent="e4" vertex="1" connectable="0">
+          <mxGeometry x="-0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
         </mxCell>
-        <mxCell id="e4" style="endArrow=classic;html=1;strokeColor=#E59B0F;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=1;" parent="1" source="brokerIcon" target="sb1" edge="1">
+
+        <mxCell id="e5" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" source="poolBox" target="natIcon" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e4lbl" value="ARM: PUT/DELETE&#xa;containerGroup" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#E59B0F;background=#FFFFFF;" parent="e4" vertex="1" connectable="0">
-          <mxGeometry x="-0.1" relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
+        <mxCell id="e5lbl" value="outbound 443" style="edgeLabel;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e5" vertex="1" connectable="0">
+          <mxGeometry x="-0.05" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
         </mxCell>
-        <mxCell id="e5" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="poolBox" target="natIcon" edge="1">
+
+        <mxCell id="e6" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;curved=1;" parent="1" source="natIcon" target="saasBox" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e5lbl" value="outbound 443" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" connectable="0" vertex="1" parent="e5">
-          <mxGeometry x="-0.05" relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
+        <mxCell id="e6lbl" value="TLS to real SaaS" style="edgeLabel;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e6" vertex="1" connectable="0">
+          <mxGeometry x="-0.1" relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
         </mxCell>
-        <mxCell id="e6" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;curved=1;" parent="1" source="natIcon" target="saasBox" edge="1">
+
+        <mxCell id="e7" style="endArrow=classic;html=1;strokeColor=#5A6678;strokeWidth=1;dashed=1;exitX=1;exitY=1;entryX=0.5;entryY=0;curved=1;" parent="1" source="poolBox" target="dnsIcon" edge="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e6lbl" value="TLS to real SaaS" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#0078D4;background=#FFFFFF;" parent="e6" vertex="1" connectable="0">
-          <mxGeometry x="-0.1" relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
+        <mxCell id="e7lbl" value="DNS" style="edgeLabel;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;background=#FFFFFF;" parent="e7" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry"><mxPoint as="offset" /></mxGeometry>
         </mxCell>
-        <mxCell id="e7" style="endArrow=classic;html=1;strokeColor=#5A6678;strokeWidth=1;dashed=1;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;curved=1;" parent="1" source="poolBox" target="dnsIcon" edge="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e7lbl" value="DNS" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;background=#FFFFFF;" connectable="0" vertex="1" parent="e7">
-          <mxGeometry relative="1" as="geometry">
-            <mxPoint as="offset" />
-          </mxGeometry>
-        </mxCell>
-        <mxCell id="e8" style="endArrow=classic;html=1;strokeColor=#5A6678;strokeWidth=1;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="brokerIcon" target="kvIcon" edge="1">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
+
+        <!-- Legend -->
         <mxCell id="legendBox" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9E9E9E;" vertex="1" parent="1">
-          <mxGeometry x="60" y="910" width="540" height="76" as="geometry" />
+          <mxGeometry x="60" y="900" width="540" height="70" as="geometry" />
         </mxCell>
         <mxCell id="legendTitle" value="Legend" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontStyle=1;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
-          <mxGeometry x="60" y="910" width="540" height="20" as="geometry" />
+          <mxGeometry x="60" y="900" width="540" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="legendContent" value="━━ blue:  user / data plane (HTTPS, WSS to /websockify, TLS sandbox→SaaS)&#xa;┄┄ dashed:  control / metadata (OIDC, DNS, KV access, ARM)&#xa;Orange:  per-browser RBI sandbox (Azure Container Instance, custom kiosk image)" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=4;" vertex="1" parent="1">
-          <mxGeometry x="60" y="932" width="540" height="50" as="geometry" />
+        <mxCell id="legendContent" value="━━ blue:  user / data plane (HTTPS, WSS to /websockify, TLS sandbox→SaaS)&#xa;┄┄ dashed:  control / metadata (DNS, ARM PUT/DELETE)&#xa;Orange:  per-browser RBI sandbox (Azure Container Instance, custom kiosk image)" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="60" y="922" width="540" height="46" as="geometry" />
         </mxCell>
         <mxCell id="footer" value="Cloaks: URL · DNS · cert · DOM · cookies · response body · server/x-powered-by/x-nextjs-* headers · etag · cert-error interstitial · network capture · browser memory      NOT cloaked: rendered SaaS pixels (branding visible)" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontFamily=Helvetica;fontColor=#7A5A00;fontStyle=2;" vertex="1" parent="1">
-          <mxGeometry x="620" y="930" width="960" height="40" as="geometry" />
+          <mxGeometry x="620" y="920" width="960" height="40" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

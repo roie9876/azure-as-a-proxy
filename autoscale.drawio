@@ -1,0 +1,167 @@
+<mxfile host="Electron" agent="Mozilla/5.0" version="24.7.17">
+  <diagram id="autoscale" name="Autoscale">
+    <mxGraphModel dx="1674" dy="789" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="980" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Autoscale — Two independent scaling tracks" style="text;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontColor=#1F3864;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="60" y="20" width="1480" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Track 1: Broker replicas (ACA, KEDA HTTP rule)   ·   Track 2: Per-browser sandboxes (ACI, broker-orchestrated, 1 per browser)" style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontColor=#5A6678;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="60" y="52" width="1480" height="22" as="geometry" />
+        </mxCell>
+
+        <!-- ============ TRACK 1 ============ -->
+        <mxCell id="t1Zone" value="Track 1 — Broker replicas (Azure Container Apps, KEDA HTTP autoscaler)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#0078D4;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#0F4C81;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="1520" height="380" as="geometry" />
+        </mxCell>
+
+        <!-- Trigger -->
+        <mxCell id="t1Trigger" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="160" width="280" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="t1TriggerTitle" value="Scaling trigger" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
+          <mxGeometry x="80" y="170" width="280" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="t1TriggerBody" value="HTTP concurrency rule (KEDA built-in)&#xa;&#xa;concurrentRequests = 50&#xa;&#xa;Replica added when active&#xa;requests/replica &gt; 50.&#xa;Replica removed after a&#xa;cool-down period when load drops." style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="92" y="195" width="260" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Bounds -->
+        <mxCell id="t1Bounds" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="380" y="160" width="240" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="t1BoundsTitle" value="Bounds" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#0F4C81;" vertex="1" parent="1">
+          <mxGeometry x="380" y="170" width="240" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="t1BoundsBody" value="minReplicas = 2&#xa;  (no cold start, 1 zone-fault buffer)&#xa;&#xa;maxReplicas = 5&#xa;  (raise as user count grows)&#xa;&#xa;Each replica:&#xa;  CPU 0.5 · 1 GiB RAM" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="392" y="195" width="220" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Replicas visualization -->
+        <mxCell id="t1RepBox" value="Active broker replicas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;strokeWidth=1;verticalAlign=top;fontStyle=1;fontSize=12;fontFamily=Helvetica;fontColor=#0F4C81;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="640" y="160" width="900" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="r1" value="Replica 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#0078D4;fontSize=11;fontFamily=Helvetica;fontStyle=1;fontColor=#0F4C81;align=center;" vertex="1" parent="1">
+          <mxGeometry x="660" y="195" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="r2" value="Replica 2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#0078D4;fontSize=11;fontFamily=Helvetica;fontStyle=1;fontColor=#0F4C81;align=center;" vertex="1" parent="1">
+          <mxGeometry x="780" y="195" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" value="Replica 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;dashed=1;fontSize=11;fontFamily=Helvetica;fontColor=#0F4C81;align=center;" vertex="1" parent="1">
+          <mxGeometry x="900" y="195" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="r4" value="Replica 4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;dashed=1;fontSize=11;fontFamily=Helvetica;fontColor=#0F4C81;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="195" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="r5" value="Replica 5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0078D4;dashed=1;fontSize=11;fontFamily=Helvetica;fontColor=#0F4C81;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="195" width="100" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1Legend" value="Solid = always running (min=2)         Dashed = added/removed by autoscaler based on incoming HTTP &amp; WS load" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="660" y="270" width="860" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1Note" value="What scales the broker is the user-facing HTTP/WSS load (page loads, websocket pings, reverse-proxy requests for noVNC assets). Long-lived WS streams count toward concurrency, so each connected user contributes ~1 to the metric." style="text;html=1;align=center;fontSize=11;fontStyle=2;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="660" y="295" width="860" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1Edge" style="endArrow=classic;html=1;strokeColor=#0078D4;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" parent="1" source="t1Bounds" target="t1RepBox" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1Footer" value="Bicep: infra/modules/aca-broker.bicep · scale.{minReplicas,maxReplicas} + scale.rules.http.metadata.concurrentRequests" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontStyle=2;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="40" y="450" width="1520" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ============ TRACK 2 ============ -->
+        <mxCell id="t2Zone" value="Track 2 — Per-browser sandboxes (Azure Container Instances, broker-orchestrated)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E59B0F;strokeWidth=2;verticalAlign=top;fontStyle=1;fontSize=13;fontFamily=Helvetica;fontColor=#8C5A00;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="500" width="1520" height="450" as="geometry" />
+        </mxCell>
+
+        <!-- Trigger / model -->
+        <mxCell id="t2Trigger" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="560" width="320" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="t2TriggerTitle" value="Scaling model" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="80" y="570" width="320" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="t2TriggerBody" value="NOT auto-scaled by Azure.&#xa;The broker is the orchestrator.&#xa;&#xa;Scale unit  = 1 ACI per browser&#xa;&#xa;Trigger = a new browser hits&#xa;the broker without an existing&#xa;cloak_browser_id cookie.&#xa;&#xa;The broker calls ARM PUT&#xa;containerGroups/&lt;guid&gt; to create&#xa;a fresh ACI in the sandbox subnet." style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="92" y="595" width="300" height="180" as="geometry" />
+        </mxCell>
+
+        <!-- Warm pool -->
+        <mxCell id="t2Warm" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="420" y="560" width="320" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="t2WarmTitle" value="Warm pool (latency hack)" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="420" y="570" width="320" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="t2WarmBody" value="WARM_POOL_SIZE = 2&#xa;&#xa;Background task in the broker keeps&#xa;N idle pre-provisioned ACIs ready.&#xa;&#xa;On new browser: assign one&#xa;immediately (no 30-60s cold start),&#xa;then provision a replacement to&#xa;refill the pool.&#xa;&#xa;On idle/logout: tear down the&#xa;user's ACI and refill the pool." style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="432" y="595" width="300" height="180" as="geometry" />
+        </mxCell>
+
+        <!-- Lifecycle -->
+        <mxCell id="t2Life" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="560" width="320" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="t2LifeTitle" value="Lifecycle (per ACI)" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="760" y="570" width="320" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="t2LifeBody" value="1. Browser hits /  → cookie minted&#xa;2. /session → broker assigns ACI&#xa;3. WS /websockify → noVNC stream&#xa;4. SaaS auth happens INSIDE the ACI&#xa;5. SESSION_IDLE_TIMEOUT_SECONDS&#xa;   = 600  → idle teardown&#xa;6. POST /logout → immediate teardown&#xa;7. ACI deleted, pool refilled" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="772" y="595" width="300" height="180" as="geometry" />
+        </mxCell>
+
+        <!-- Capacity -->
+        <mxCell id="t2Cap" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="560" width="440" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="t2CapTitle" value="Capacity ceiling" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="570" width="440" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="t2CapBody" value="Bound by:&#xa;  · ACI vCPU/memory subscription quota in the region&#xa;  · Free IPs in the sessionsSubnetId (delegated subnet)&#xa;  · ARM containerGroup PUT throttling (~1200/hr/sub)&#xa;&#xa;Sizing rule of thumb:&#xa;  Each ACI = 1 vCPU, 2 GiB RAM, 1 private IP.&#xa;  100 concurrent users → /25 subnet + ~100 vCPU quota.&#xa;&#xa;If quota is hit: broker returns 503 to the new browser.&#xa;Existing browsers (with assigned ACIs) are unaffected." style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontFamily=Helvetica;fontColor=#424242;spacingLeft=14;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="1112" y="595" width="420" height="180" as="geometry" />
+        </mxCell>
+
+        <!-- Sandbox icons -->
+        <mxCell id="t2SbBox" value="ACIs in flight" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#D6A419;strokeWidth=1;dashed=1;verticalAlign=top;fontStyle=1;fontSize=12;fontFamily=Helvetica;fontColor=#8C5A00;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="80" y="800" width="1460" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aci1" value="ACI #1&#xa;Browser A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;fontSize=10;fontFamily=Helvetica;align=center;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="100" y="840" width="100" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="aci2" value="ACI #2&#xa;Browser B" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;fontSize=10;fontFamily=Helvetica;align=center;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="220" y="840" width="100" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="aci3" value="ACI #3&#xa;Browser C" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;fontSize=10;fontFamily=Helvetica;align=center;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="340" y="840" width="100" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="aciDots" value="…" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontFamily=Helvetica;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="460" y="840" width="40" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="aciN" value="ACI #N&#xa;Browser N" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E59B0F;fontSize=10;fontFamily=Helvetica;align=center;fontColor=#8C5A00;" vertex="1" parent="1">
+          <mxGeometry x="510" y="840" width="100" height="64" as="geometry" />
+        </mxCell>
+
+        <mxCell id="warm1" value="WARM&#xa;idle" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E59B0F;dashed=1;fontSize=10;fontFamily=Helvetica;align=center;fontColor=#8C5A00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="840" width="100" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="warm2" value="WARM&#xa;idle" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E59B0F;dashed=1;fontSize=10;fontFamily=Helvetica;align=center;fontColor=#8C5A00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="820" y="840" width="100" height="64" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2SbLegend" value="N assigned ACIs (1 per browser)        +        WARM_POOL_SIZE = 2 idle pre-provisioned ACIs" style="text;html=1;align=center;fontSize=10;fontFamily=Helvetica;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="855" width="520" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Footer note -->
+        <mxCell id="footer" value="Track 1 (broker replicas) and Track 2 (per-browser ACIs) are independent. The broker replica count grows with HTTP/WS traffic; the ACI count grows with the number of distinct active browsers. Per-replica concurrency cap is 50 — well above the average 1-WS-per-user." style="text;html=1;align=center;fontSize=11;fontFamily=Helvetica;fontStyle=2;fontColor=#5A6678;" vertex="1" parent="1">
+          <mxGeometry x="60" y="950" width="1480" height="20" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

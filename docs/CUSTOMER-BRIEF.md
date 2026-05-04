@@ -82,12 +82,13 @@ only sees a pixel stream from a generic-looking front door we control.
 - One hostname: the customer's **own custom domain** on Front Door
   (e.g. `workspace.customer.com`) — no `azure.com`, no `microsoft.com` in DNS.
 - The customer's chosen TLS certificate (custom domain).
-- A login page on the customer's domain (the broker's `/login`). Optionally
-  federated to the customer's IdP (Entra / Auth0 / Okta / Keycloak), but the
-  customer's IdP — never the SaaS's.
-- After login: a single full-page **pixel stream** (WebSocket) of a remote
-  Chromium browser. No `_next/`, no `/api/v1/`, no `Server` header, no
-  framework fingerprints.
+- **No login page from the cloak.** The cloak performs no user authentication
+  of its own. Whoever can reach the URL (subject to the FD WAF IP allowlist,
+  see §5) lands directly on a streamed Chromium that points at the SaaS;
+  the SaaS's own login flow runs inside the sandbox.
+- A single full-page **pixel stream** (WebSocket) of a remote Chromium
+  browser. No `_next/`, no `/api/v1/`, no `Server` header, no framework
+  fingerprints.
 
 ### What the SaaS sees
 
@@ -144,11 +145,10 @@ SaaS redirects. F12 sees only broker + Front Door responses (verified against a
 | **Azure Front Door Premium + WAF** | [infra/modules/front-door.bicep](../infra/modules/front-door.bicep) | Customer's public entry point. Custom domain + cert. Strips Azure routing headers. WAF blocks bots/floods. | **Surface 1 cloak (UI hostname)** |
 | Front Door → ACA via Private Link | front-door.bicep | Broker has no public IP | Broker is unreachable except via FD |
 | **ACA Environment** (internal, VNet-injected) | [infra/modules/aca-environment.bicep](../infra/modules/aca-environment.bicep) | Hosts broker | Workload identity boundary |
-| **Session Broker** (FastAPI) | [infra/modules/aca-broker.bicep](../infra/modules/aca-broker.bicep), [broker/](../broker/) | OIDC / stub login, allocates sandbox, mints attach token, proxies WebSocket → noVNC | Auth + orchestration |
+| **Session Broker** (FastAPI) | [infra/modules/aca-broker.bicep](../infra/modules/aca-broker.bicep), [broker/](../broker/) | Mints a per-browser routing cookie, allocates sandbox, proxies WebSocket → noVNC. **No user authentication.** | Sandbox lifecycle |
 | **Per-browser ACI sandbox** (custom kiosk image) | [sandbox/](../sandbox/), provisioned at runtime by broker | Debian 12-slim + Xvfb + fluxbox + x11vnc (`-nopw -localhost`) + websockify (port 6901 → VNC :5900) + bundled noVNC + Chromium `--kiosk --app=$SAAS_URL`. Pulled from ACR (`cloak-sandbox:kiosk-v2`). | Runs the actual browser; emits pixels only |
 | **Warm pool of ACIs** (N=2 idle) | broker/app/sessions.py | Pre-provisioned sandboxes ready for instant claim | Removes the ~60 s cold-start wait at login |
 | **Azure Container Registry** | (existing `acrcloak9f1d7e`) | Hosts broker + sandbox images | Private image distribution |
-| **Key Vault** + Private Endpoint | [infra/modules/keyvault.bicep](../infra/modules/keyvault.bicep) | OIDC client secret, broker session secret | No secrets in env or git |
 | **Private DNS Resolver** | [infra/modules/dns-resolver.bicep](../infra/modules/dns-resolver.bicep) | Lets sandbox resolve SaaS hostnames | Required when sandbox subnet is delegated |
 | **Log Analytics + App Insights** | [infra/modules/observability.bicep](../infra/modules/observability.bicep) | Audit, debug | Compliance evidence |
 
@@ -198,30 +198,38 @@ idle ACIs always ready**. On user login:
 
 ---
 
-## 5. Identity & secrets posture (what the customer's CISO will ask)
+## 5. Identity, access gate & secrets posture (what the customer's CISO will ask)
 
+- **There is no user authentication at the broker.** This is a deliberate
+  design choice: the SaaS itself authenticates the user inside the sandbox
+  (Entra / Okta / username+password / MFA / passkey — whatever the SaaS owns).
+  Adding a second auth layer at the broker would not make the SaaS more
+  secure and would force the customer to onboard every user into a second IdP.
+- **Access to the cloak URL is gated at the Front Door WAF.** The Bicep
+  exposes a single parameter `allowedSourceIps array = []` ([`infra/main.bicep`](../infra/main.bicep)).
+  When non-empty, a custom WAF rule `AllowOnlyListedIps` blocks every
+  request whose source IP is not in the list. When empty (current PoC), no
+  IP restriction is applied — the URL is the secret. For production, fill
+  the array with the customer's corporate egress CIDRs.
+- **Browser identity is a routing cookie, not an auth credential.** The
+  broker mints two HttpOnly cookies on first hit: `cloak_browser_id` (UUID)
+  and `cloak_session` (signed by an in-process secret). They exist only to
+  route a returning browser to its already-allocated ACI; they do not
+  identify a human and they cannot be reused after a broker restart.
 - **Broker has Managed Identity** (no client secrets in code).
 - **Broker MI → Resource group: Contributor** — required to provision/delete
   ACIs at runtime. Tightenable to a custom role limited to
   `Microsoft.ContainerInstance/containerGroups/*` if the customer prefers
   least-privilege.
-- **Broker MI → Key Vault: Secrets User** — read-only access to OIDC client
-  secret + broker session-signing secret.
 - **All inter-service traffic is private**: Front Door → ACA via Private Link;
-  ACA → KV via Private Endpoint; ACI subnet has no public ingress.
+  ACI subnet has no public ingress.
 - **Egress-only to internet** through NAT GW; no inbound from internet to any
   workload subnet.
-- **PoC identity model:** stub auth + a per-browser UUID cookie
-  (`cloak_browser_id`, HttpOnly, 8 h) becomes the user `sub`. This guarantees
-  one isolated sandbox per browser, no cross-user state, and no shared
-  Chromium profile — without requiring a real IdP for demo purposes.
-- **Production identity model:** OIDC Authorization Code + PKCE against the
-  customer's IdP (Entra / Auth0 / Okta / Keycloak). The cookie identity model
-  collapses transparently into the OIDC `sub` claim.
 - **VNC has no password on the wire** — `x11vnc -nopw -localhost` binds only to
   127.0.0.1 inside the ACI; the only way in is via the loopback websockify
-  bridge, itself only reachable through the broker-issued attach token.
-- **WAF in Prevention mode** with Microsoft Default Rule Set + Bot Manager.
+  bridge, itself only reachable through the broker's WebSocket proxy.
+- **WAF in Prevention mode** with Microsoft Default Rule Set + Bot Manager
+  on top of the optional IP allowlist rule.
 
 ---
 
@@ -251,7 +259,7 @@ Current deployed PoC values (Sweden Central):
 - Pinned demo SaaS URL: `https://arh2b5deb8dmcvcf.fz37.alb.azure.com/`
 
 Customer can fork, adjust [infra/main.bicepparam](../infra/main.bicepparam) (region,
-custom domain, OIDC config, SaaS URL), point their ACR at it, and
+custom domain, `allowedSourceIps`, SaaS URL), point their ACR at it, and
 `azd up`-style deploy.
 
 ---
@@ -261,10 +269,9 @@ custom domain, OIDC config, SaaS URL), point their ACR at it, and
 | Item | Why it can't be automated |
 |------|--------------------------|
 | Custom domain (e.g. `workspace.customer.com`) on Front Door | Customer owns DNS zone; needs CNAME validation + cert. Param `portalHostname` supports it. |
-| OIDC IdP registration | Customer chooses Entra / Auth0 / Okta / Keycloak. Provide issuer URL + client ID; secret goes in Key Vault. |
-| Allowlist of users (optional) | `userAllowlist` param: comma-separated list of `sub` / email / UPN. |
+| WAF IP allowlist | Customer provides corporate egress CIDRs to populate `allowedSourceIps`. PoC default is empty (no IP restriction). |
 | Front Door → Private Endpoint approval | First deploy creates a pending PE connection on the ACA env; customer-tenant approval is required (one-time, in Portal or `az network private-endpoint-connection approve`). |
-| SaaS-side credentials | Stored in Key Vault; injected into sandbox by the broker at session start. |
+| SaaS-side credentials | The user signs into the SaaS inside the sandbox. The cloak does not store SaaS credentials anywhere. |
 
 ---
 
@@ -277,7 +284,7 @@ custom domain, OIDC config, SaaS URL), point their ACR at it, and
 | ACI warm pool (2× 2 vCPU 4 GiB, idle 24/7) | ~$180 |
 | ACI per-session (claimed, ~hours/day per active user) | usage-based |
 | NAT Gateway + Static IP | ~$45 |
-| Key Vault, Log Analytics, App Insights, DNS Resolver | ~$30 |
+| Log Analytics, App Insights, DNS Resolver | ~$25 |
 | **Baseline total (no users)** | **~$615/mo** |
 
 Per active user incremental: 2 vCPU × hours-active × ~$0.05/hr = a few dollars
@@ -317,15 +324,13 @@ per user-day. Warm-pool size tunes cold-start vs idle cost.
   fresh `az deployment sub create` doesn't clobber them.
 - Replace in-memory warm-pool maps with **Redis (Azure Cache for Redis)** for
   HA across multiple broker replicas.
-- Switch Key Vault `publicNetworkAccess` to **Disabled** + dedicated PE.
 - Tighten broker MI from Contributor to a **custom role** scoped to
   `Microsoft.ContainerInstance/containerGroups/*`.
-- Add **JWKS verification** of OIDC `id_token` (currently trusts UserInfo
-  endpoint) and replace the cookie-only stub auth with the real OIDC flow.
 - Replace the self-signed demo SaaS cert with a CA-signed cert, then flip
   `INSECURE_SAAS=0` so the kiosk Chromium enforces full TLS verification.
 - Optional: per-tenant ACR pull token instead of admin creds.
 - Optional: session recording (Xvfb → ffmpeg → blob) for compliance.
+- Optional: bind a custom domain on Front Door + provision a customer-managed cert.
 
 ---
 

@@ -1,5 +1,5 @@
 // Session Broker — Container App in the ACA env.
-// - System-assigned managed identity (used to call Dynamic Sessions API + read Key Vault).
+// - System-assigned managed identity (used to call ARM to provision ACI sandboxes).
 // - Internal ingress only; Front Door reaches it via Private Endpoint to the ACA env.
 // - WebSocket-aware ingress.
 @description('Naming prefix.')
@@ -12,8 +12,6 @@ param tags object
 param acaEnvironmentId string
 @description('Broker container image (FastAPI).')
 param brokerImage string
-@description('Key Vault name (for RBAC + reference).')
-param keyVaultName string
 @description('Sandbox container image for ACI provisioning (custom kiosk: Xvfb+x11vnc+websockify+noVNC+Chromium).')
 param sandboxImage string
 @description('Subnet ID for sandbox ACIs (delegated to Microsoft.ContainerInstance/containerGroups).')
@@ -23,12 +21,6 @@ param saasUrl string
 @description('\'1\' = ignore TLS errors for SAAS_URL (PoC against self-signed); \'0\' = strict TLS verification.')
 @allowed([ '0', '1' ])
 param insecureSaas string = '0'
-@description('OIDC issuer URL (empty = stub auth).')
-param oidcIssuer string
-@description('OIDC client ID (empty = stub auth).')
-param oidcClientId string
-@description('User allowlist (comma-separated).')
-param userAllowlist string
 
 @description('ACR name (empty = no creds, image must be public).')
 param acrName string = ''
@@ -37,6 +29,10 @@ param acrName string = ''
 param minReplicas int = 2
 @description('Max replicas.')
 param maxReplicas int = 5
+
+@description('Stable secret used by the broker to sign the cloak_session routing cookie. Defaults to a deployment-time GUID; set explicitly to keep cookies valid across redeploys.')
+@secure()
+param brokerSessionSecret string = newGuid()
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = if (!empty(acrName)) {
   name: acrName
@@ -61,7 +57,16 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
           name: 'acr-password'
           value: acr.listCredentials().passwords[0].value
         }
-      ] : []
+        {
+          name: 'broker-session-secret'
+          value: brokerSessionSecret
+        }
+      ] : [
+        {
+          name: 'broker-session-secret'
+          value: brokerSessionSecret
+        }
+      ]
       registries: useAcr ? [
         {
           server: '${acrName}.azurecr.io'
@@ -105,13 +110,10 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'ACR_SERVER', value: useAcr ? '${acrName}.azurecr.io' : '' }
             { name: 'ACR_USERNAME', value: useAcr ? acr.listCredentials().username : '' }
             { name: 'ACR_PASSWORD', secretRef: useAcr ? 'acr-password' : null }
-            { name: 'KEY_VAULT_NAME', value: keyVaultName }
-            { name: 'OIDC_ISSUER', value: oidcIssuer }
-            { name: 'OIDC_CLIENT_ID', value: oidcClientId }
-            { name: 'USER_ALLOWLIST', value: userAllowlist }
             { name: 'WARM_POOL_SIZE', value: '2' }
             { name: 'SESSION_IDLE_TIMEOUT_SECONDS', value: '600' }
             { name: 'BROKER_LOG_LEVEL', value: 'INFO' }
+            { name: 'BROKER_SESSION_SECRET', secretRef: 'broker-session-secret' }
           ]
           probes: [
             {
@@ -152,22 +154,6 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
 }
 
 // ---- RBAC ----
-// Broker MI -> Key Vault Secrets User (read OIDC client secret + signing key)
-resource kvRef 'Microsoft.KeyVault/vaults@2024-04-01-preview' existing = {
-  name: keyVaultName
-}
-
-resource kvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: kvRef
-  name: guid(kvRef.id, broker.id, 'kv-secrets-user')
-  properties: {
-    // Key Vault Secrets User
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
-    principalId: broker.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 // Broker MI -> Resource group: Contributor (provision/delete ACI sandboxes).
 // Role definition GUID: b24988ac-6180-42a0-ab88-20f7382dd24c (Contributor)
 resource rgContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {

@@ -1,12 +1,13 @@
 """Session Broker — entrypoint.
 
+No user authentication. The SaaS itself authenticates the human inside the
+per-browser ACI sandbox. The broker's cookie is a routing key, not a credential.
+
 Routes:
-  GET  /                      Portal page (generic, no SaaS branding)
+  GET  /                      Mint browser-session cookie, redirect to /session
   GET  /healthz, /readyz      Health/readiness probes
-  GET  /login                 Begin OIDC (or stub) login
-  GET  /auth/callback         OIDC callback
-  POST /session               Allocate a sandbox, redirect to /attach
-  WS   /attach?token=...      Pixel-stream WebSocket proxy to the sandbox
+  GET  /session               Allocate (or attach to) this browser's sandbox
+  WS   /websockify            Pixel-stream WebSocket proxy to the sandbox
   POST /logout                Tear down sandbox + clear cookie
 """
 from __future__ import annotations
@@ -21,21 +22,16 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSoc
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .auth import (
+    BROWSER_ID_COOKIE,
     SESSION_COOKIE,
-    STATE_COOKIE,
-    AuthedUser,
-    _oidc_metadata,
-    begin_login_url,
-    exchange_code,
+    BrowserSession,
     issue_session_cookie,
-    random_state,
+    mint_browser_id,
     read_session_cookie,
-    require_user,
-    stub_user,
+    require_session,
 )
 from .config import settings
 from .middleware import HeaderHygieneMiddleware
-from .secrets_bag import bag
 from .sessions import (
     allocate_sandbox,
     destroy_sandbox,
@@ -50,9 +46,8 @@ logger = logging.getLogger("broker")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    bag.load()
     await start_warmer()
-    logger.info("broker started; stub_auth=%s warm_pool_size=%d", settings.stub_auth, settings.warm_pool_size)
+    logger.info("broker started; warm_pool_size=%d", settings.warm_pool_size)
     try:
         yield
     finally:
@@ -75,29 +70,9 @@ async def readyz():
 
 
 # ---------- Portal page ----------
-PORTAL_HTML = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Secure Workspace</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<style>
-  body{font-family:system-ui,sans-serif;background:#0b0b0d;color:#e8e8ea;margin:0;display:grid;place-items:center;min-height:100vh}
-  .card{background:#16161a;padding:32px 40px;border-radius:12px;max-width:420px;text-align:center;box-shadow:0 1px 0 rgba(255,255,255,.04)}
-  h1{font-size:18px;margin:0 0 12px;font-weight:500}
-  p{font-size:13px;color:#9aa0a6;line-height:1.5;margin:0 0 20px}
-  button{background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:8px;font-size:14px;cursor:pointer}
-  button:hover{background:#2563eb}
-</style>
-</head>
-<body>
-  <div class="card">
-    <h1>Secure Workspace</h1>
-    <p>Sign in to start a session. Your session runs in an isolated environment and is destroyed when you log out.</p>
-    <form action="/login" method="get"><button type="submit">Sign in</button></form>
-  </div>
-</body>
+# No portal/sign-in UI: the broker mints a routing cookie automatically.
+# The user lands directly inside the per-browser ACI sandbox where the SaaS
+# enforces its own authentication.
 </html>"""
 
 ATTACH_HTML = """<!doctype html>
@@ -117,75 +92,45 @@ ATTACH_HTML = """<!doctype html>
 </html>"""
 
 
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    user = read_session_cookie(request)
-    if user:
-        return RedirectResponse("/session", status_code=303)
-    return HTMLResponse(PORTAL_HTML)
+def _ensure_session(request: Request) -> tuple[BrowserSession, RedirectResponse | None]:
+    """Return (session, optional redirect-with-fresh-cookies).
 
-
-# ---------- Auth ----------
-@app.get("/login")
-async def login(request: Request):
-    if settings.stub_auth:
-        # PoC: per-browser identity. Each browser gets its own UUID cookie ->
-        # its own sandbox. Two browsers = two ACIs = no cross-contamination
-        # (README §3 / §4.2 step 2). Replaced when real OIDC is configured.
-        import uuid
-        browser_id = request.cookies.get("cloak_browser_id")
-        if not browser_id:
-            browser_id = uuid.uuid4().hex
-        u = AuthedUser(sub=browser_id, email=f"{browser_id[:8]}@stub.local")
-        resp = RedirectResponse("/session", status_code=303)
-        resp.set_cookie(
-            "cloak_browser_id", browser_id,
-            httponly=True, secure=True, samesite="lax", path="/",
-            max_age=60 * 60 * 8,  # 8h
-        )
-        resp.set_cookie(
-            SESSION_COOKIE, issue_session_cookie(u),
-            httponly=True, secure=True, samesite="lax", path="/",
-            max_age=settings.session_idle_timeout_seconds,
-        )
-        return resp
-
-    state = random_state()
-    redirect_uri = str(request.url_for("auth_callback"))
-    meta = await _oidc_metadata()
-    url = begin_login_url(state, redirect_uri, meta)
-    resp = RedirectResponse(url, status_code=303)
-    resp.set_cookie(STATE_COOKIE, state, httponly=True, secure=True, samesite="lax", path="/", max_age=300)
-    return resp
-
-
-@app.get("/auth/callback", name="auth_callback")
-async def auth_callback(request: Request, code: str = "", state: str = ""):
-    if settings.stub_auth:
-        raise HTTPException(404)
-    expected = request.cookies.get(STATE_COOKIE)
-    if not expected or expected != state:
-        raise HTTPException(400, "state mismatch")
-    meta = await _oidc_metadata()
-    redirect_uri = str(request.url_for("auth_callback"))
-    user = await exchange_code(code, redirect_uri, meta)
-    if not user.sub:
-        raise HTTPException(401)
+    If the request has no valid cookie, mint a new browser_id, set both cookies
+    on a 303 redirect to /session so the next hop carries them.
+    """
+    s = read_session_cookie(request)
+    if s:
+        return s, None
+    browser_id = request.cookies.get(BROWSER_ID_COOKIE) or mint_browser_id()
+    new_s = BrowserSession(sub=browser_id)
     resp = RedirectResponse("/session", status_code=303)
     resp.set_cookie(
-        SESSION_COOKIE, issue_session_cookie(user),
+        BROWSER_ID_COOKIE, browser_id,
+        httponly=True, secure=True, samesite="lax", path="/",
+        max_age=settings.browser_id_ttl_seconds,
+    )
+    resp.set_cookie(
+        SESSION_COOKIE, issue_session_cookie(new_s),
         httponly=True, secure=True, samesite="lax", path="/",
         max_age=settings.session_idle_timeout_seconds,
     )
-    resp.delete_cookie(STATE_COOKIE, path="/")
-    return resp
+    return new_s, resp
+
+
+@app.get("/")
+async def root(request: Request):
+    """Mint cookies on first visit, then bounce to /session."""
+    _, redirect = _ensure_session(request)
+    if redirect is not None:
+        return redirect
+    return RedirectResponse("/session", status_code=303)
 
 
 @app.post("/logout")
 async def logout(request: Request):
-    user = read_session_cookie(request)
-    if user:
-        await destroy_sandbox(user.sub)
+    s = read_session_cookie(request)
+    if s:
+        await destroy_sandbox(s.sub)
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie(SESSION_COOKIE, path="/")
     return resp
@@ -194,8 +139,10 @@ async def logout(request: Request):
 # ---------- Session allocation ----------
 @app.get("/session", response_class=HTMLResponse)
 async def session_page(request: Request):
-    user = require_user(request)
-    await allocate_sandbox(user.sub)
+    s, redirect = _ensure_session(request)
+    if redirect is not None:
+        return redirect
+    await allocate_sandbox(s.sub)
     return HTMLResponse(ATTACH_HTML)
 
 
@@ -213,24 +160,24 @@ _HOP_BY_HOP = {
 
 
 def _resolve_sandbox_base(request: Request) -> str:
-    """Return the upstream base URL for the authenticated user's sandbox."""
-    user = require_user(request)
-    sb = sandbox_for_user(user.sub)
+    """Return the upstream base URL for this browser's sandbox."""
+    s = require_session(request)
+    sb = sandbox_for_user(s.sub)
     if not sb or not sb.private_ip:
-        # No sandbox yet — kick the user back to /session to allocate.
+        # No sandbox yet — kick the browser back to /session to allocate.
         raise HTTPException(status_code=409, detail="no sandbox; visit /session first")
     return f"{settings.sandbox_scheme}://{sb.private_ip}:{settings.sandbox_port}"
 
 
 @app.websocket("/websockify")
 async def websockify_proxy(ws: WebSocket):
-    """Pixel-stream WebSocket: browser -> broker -> Kasm websockify."""
-    # Validate session cookie BEFORE accept(); WebSocket carries cookies.
-    user = read_session_cookie(ws)  # type: ignore[arg-type]
-    if not user:
+    """Pixel-stream WebSocket: browser -> broker -> sandbox websockify."""
+    # Validate routing cookie BEFORE accept(); WebSocket carries cookies.
+    s = read_session_cookie(ws)  # type: ignore[arg-type]
+    if not s:
         await ws.close(code=4401)
         return
-    sb = sandbox_for_user(user.sub)
+    sb = sandbox_for_user(s.sub)
     if not sb or not sb.private_ip:
         await ws.close(code=4404)
         return
@@ -324,7 +271,7 @@ def _get_proxy_client() -> httpx.AsyncClient:
 
 # Paths reserved by the broker — never proxied to the sandbox.
 _BROKER_PATHS = {
-    "", "healthz", "readyz", "login", "logout", "session", "auth/callback",
+    "", "healthz", "readyz", "logout", "session",
     "websockify", "favicon.ico",
 }
 

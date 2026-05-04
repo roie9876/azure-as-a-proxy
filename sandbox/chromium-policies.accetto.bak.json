@@ -1,0 +1,31 @@
+{
+  "_comment": "Chromium managed policies — pin User-Agent, language, disable WebRTC IP leak, disable DoH (use system DNS via Azure DNS Private Resolver in egress region).",
+
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "TranslateEnabled": false,
+  "SearchSuggestEnabled": false,
+  "MetricsReportingEnabled": false,
+  "SafeBrowsingProtectionLevel": 0,
+  "PromotionalTabsEnabled": false,
+  "DefaultBrowserSettingEnabled": false,
+
+  "WebRtcIPHandling": "disable_non_proxied_udp",
+  "DnsOverHttpsMode": "off",
+
+  "UserAgentClientHintsEnabled": false,
+  "UserAgentClientHintsGREASEUpdateEnabled": false,
+
+  "ExtensionInstallBlocklist": ["*"],
+
+  "URLAllowlist": ["*"],
+  "URLBlocklist": [],
+
+  "_note_useragent": "User-Agent itself is forced via the entrypoint --user-agent flag (Chromium policies do not allow direct UA override).",
+  "_note_acceptlang": "Accept-Language is forced via --accept-lang in the entrypoint plus IntlAcceptLanguage policy below.",
+
+  "IntlAcceptLanguage": "en-US,en;q=0.9"
+}

@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+# Sandbox image: TigerVNC + websockify + Chromium, accetto/ubuntu-vnc-xfce-chromium-g3.
+#
+# Why not Kasm:
+#   The kasmweb/* images expect docker --shm-size=1g + extra namespaces that
+#   plain Azure Container Instances do not provide. They hang on startup.
+#   accetto's image works in vanilla containers (CI, ACI, plain docker run) and
+#   serves noVNC HTTP on port 6901.
+#
+# Ports inside container:
+#   6901 — HTTP (noVNC web UI + websockify on the same port)
+#   5901 — raw VNC (not exposed by us)
+ARG BASE_TAG=latest
+FROM accetto/ubuntu-vnc-xfce-chromium-g3:${BASE_TAG}
+
+# Chromium policies — applied to every browser launch.
+USER 0
+COPY chromium-policies.json /etc/chromium/policies/managed/cloak.json
+# Inherit upstream USER (the entrypoint switches to the headless user itself).
+
+EXPOSE 6901
+# Upstream ENTRYPOINT/CMD intentionally inherited.

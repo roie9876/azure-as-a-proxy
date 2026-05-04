@@ -12,6 +12,11 @@ param brokerResourceId string
 @description('Custom hostname (e.g. portal.contoso.com). Empty = use *.azurefd.net default.')
 param portalHostname string
 
+@description('Public source IP/CIDR allowlist for the WAF. Empty = no IP restriction.')
+param allowedSourceIps array = []
+
+var enforceIpAllowlist = !empty(allowedSourceIps)
+
 // --- WAF policy ---
 resource waf 'Microsoft.Network/FrontDoorWebApplicationFirewallPolicies@2024-02-01' = {
   name: 'waf${namePrefix}'
@@ -38,6 +43,25 @@ resource waf 'Microsoft.Network/FrontDoorWebApplicationFirewallPolicies@2024-02-
           ruleSetVersion: '1.1'
         }
       ]
+    }
+    customRules: {
+      rules: enforceIpAllowlist ? [
+        {
+          name: 'AllowOnlyListedIps'
+          priority: 100
+          enabledState: 'Enabled'
+          ruleType: 'MatchRule'
+          action: 'Block'
+          matchConditions: [
+            {
+              matchVariable: 'SocketAddr'
+              operator: 'IPMatch'
+              negateCondition: true
+              matchValue: allowedSourceIps
+            }
+          ]
+        }
+      ] : []
     }
   }
 }

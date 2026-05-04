@@ -24,10 +24,10 @@ param saasUrl = 'https://arh2b5deb8dmcvcf.fz37.alb.azure.com/'
 // '1' for the self-signed PoC origin; flip to '0' once SaaS is on a CA-signed cert.
 param insecureSaas = '1'
 
-// Stub auth in PoC — fill in real values when wiring an IdP.
-param oidcIssuer = ''
-param oidcClientId = ''
-param userAllowlist = ''
+// Public source IPs allowed to reach the FD endpoint (WAF custom rule).
+// Empty = no IP restriction (current PoC). Fill with corp egress CIDRs to lock down.
+// Example: ['1.2.3.4/32', '5.6.7.0/24']
+param allowedSourceIps = []
 
 // Bind your own custom domain when ready; until then Front Door serves on *.azurefd.net.
 param portalHostname = ''

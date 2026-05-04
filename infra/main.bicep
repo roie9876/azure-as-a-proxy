@@ -8,22 +8,21 @@
 //   2. Log Analytics workspace
 //   3. Hub VNet (subnets: aca, sessions, dnsResolver, privateEndpoints)
 //   4. NAT Gateway + Standard Public IP (egress to SaaS)
-//   5. Key Vault (broker session-signing key, OIDC client secret)
-//   6. DNS Private Resolver (outbound endpoint, region-consistent DNS)
-//   7. ACA managed environment (workload profiles, internal ingress, VNet-injected)
-//   8. ACA Container App: session broker (FastAPI)
-//   9. ACA Dynamic Sessions custom-container pool (Kasm chromium sandboxes)
-//  10. Private Endpoint from Front Door -> ACA env
-//  11. Front Door Premium + WAF policy + route + response-header strip rule set
+//   5. DNS Private Resolver (outbound endpoint, region-consistent DNS)
+//   6. ACA managed environment (workload profiles, internal ingress, VNet-injected)
+//   7. ACA Container App: session broker (FastAPI)
+//   8. Per-browser ACI sandboxes (provisioned at runtime by the broker)
+//   9. Private Endpoint from Front Door -> ACA env
+//  10. Front Door Premium + WAF policy + route + response-header strip rule set
 //
 // Notes:
-// - Region: swedencentral (Dynamic Sessions supported, EU residency, ~70ms RTT from IL)
+// - Region: swedencentral (EU residency, ~70ms RTT from IL)
 // - The broker container image must already exist in ACR (or override `brokerImage` to a
 //   placeholder image and update later). Same for the sandbox image.
-// - External IdP (Auth0/Okta/Keycloak/Entra) is NOT provisioned here — broker reads
-//   discovery URL + client ID from params, secret from Key Vault.
+// - There is NO user authentication at the broker. The SaaS authenticates the
+//   human inside the per-browser ACI sandbox. Restrict who can reach the FD URL
+//   via the WAF IP allowlist below (see `allowedSourceIps` param).
 // =====================================================================
-
 targetScope = 'subscription'
 
 @description('Naming prefix for all resources. Lowercase letters/numbers, 2-10 chars.')
@@ -67,17 +66,11 @@ param insecureSaas string = '0'
 @description('Name of the ACR (in same subscription) hosting the broker/sandbox images. Empty = images are public.')
 param acrName string = ''
 
-@description('External OIDC issuer URL (Auth0/Okta/Keycloak/Entra). Leave empty to use stub auth in PoC.')
-param oidcIssuer string = ''
-
-@description('External OIDC client ID. Leave empty to use stub auth in PoC.')
-param oidcClientId string = ''
-
-@description('Allowlist of user principal IDs / emails / sub claims that may use the cloak. Comma-separated.')
-param userAllowlist string = ''
-
 @description('Custom hostname for the public Front Door endpoint, e.g. portal.contoso.com. Empty = use default *.azurefd.net.')
 param portalHostname string = ''
+
+@description('Public source IP/CIDR allowlist enforced by the Front Door WAF. Empty array = no IP restriction (use only for local testing). Recommend filling with the customer corp egress IPs once known.')
+param allowedSourceIps array = []
 
 // ----- Resource group -----
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -105,16 +98,6 @@ module network 'modules/network.bicep' = {
     location: location
     tags: tags
     vnetAddressSpace: vnetAddressSpace
-  }
-}
-
-module keyvault 'modules/keyvault.bicep' = {
-  scope: rg
-  name: 'keyvault'
-  params: {
-    namePrefix: namePrefix
-    location: location
-    tags: tags
   }
 }
 
@@ -152,14 +135,10 @@ module broker 'modules/aca-broker.bicep' = {
     tags: tags
     acaEnvironmentId: acaEnv.outputs.environmentId
     brokerImage: brokerImage
-    keyVaultName: keyvault.outputs.keyVaultName
     sandboxImage: sandboxImage
     sandboxSubnetId: network.outputs.sessionsSubnetId
     saasUrl: saasUrl
     insecureSaas: insecureSaas
-    oidcIssuer: oidcIssuer
-    oidcClientId: oidcClientId
-    userAllowlist: userAllowlist
     acrName: acrName
   }
 }
@@ -173,6 +152,7 @@ module frontDoor 'modules/front-door.bicep' = {
     brokerFqdn: broker.outputs.brokerFqdn
     brokerResourceId: acaEnv.outputs.environmentId
     portalHostname: portalHostname
+    allowedSourceIps: allowedSourceIps
   }
 }
 
@@ -181,5 +161,4 @@ output resourceGroupName string = rg.name
 output frontDoorEndpoint string = frontDoor.outputs.endpointHostname
 output brokerFqdn string = broker.outputs.brokerFqdn
 output natGatewayPublicIp string = network.outputs.natPublicIp
-output keyVaultName string = keyvault.outputs.keyVaultName
 output logAnalyticsWorkspaceId string = observability.outputs.workspaceId
