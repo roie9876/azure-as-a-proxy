@@ -85,13 +85,17 @@ ATTACH_HTML = """<!doctype html>
 <style>
   html,body{margin:0;padding:0;height:100%;width:100%;background:#000;border:0;font-family:system-ui,sans-serif}
   iframe{position:absolute;inset:0;height:100%;width:100%;border:0;background:#000}
-  #upbar{position:fixed;top:8px;right:8px;z-index:10;background:rgba(20,20,24,.78);
-         color:#eaeaea;border:1px solid #333;border-radius:8px;padding:6px 10px;
-         font-size:12px;display:flex;gap:8px;align-items:center;backdrop-filter:blur(6px)}
-  #upbar button{background:#2a6df4;color:#fff;border:0;border-radius:5px;padding:5px 10px;
-                font-size:12px;cursor:pointer}
+  #upbar{position:fixed;top:8px;right:8px;z-index:10;background:rgba(20,20,24,.88);
+         color:#eaeaea;border:1px solid #333;border-radius:8px;padding:8px 12px;
+         font-size:12px;display:flex;flex-direction:column;gap:6px;align-items:stretch;
+         backdrop-filter:blur(6px);max-width:360px}
+  #uphdr{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  #upbar button{background:#2a6df4;color:#fff;border:0;border-radius:5px;padding:6px 12px;
+                font-size:12px;cursor:pointer;font-weight:600}
   #upbar button:disabled{opacity:.5;cursor:wait}
-  #upmsg{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#cbd}
+  #uphint{font-size:11px;color:#9aa3b2;line-height:1.35}
+  #upmsg{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7fd49a}
+  #upmsg.err{color:#ff8a8a}
   #upbar.hidden{display:none}
 </style>
 </head>
@@ -101,10 +105,14 @@ ATTACH_HTML = """<!doctype html>
      /websockify is the same-origin WS upgrade target. -->
 <iframe src="/vnc.html?autoconnect=1&resize=remote&path=websockify"></iframe>
 
-<div id="upbar" title="Files land in ~/uploads/ inside the sandbox; the SaaS file picker can attach them.">
+<div id="upbar" title="Send a file from your laptop into the sandbox so the SaaS file-picker can attach it. Files are saved under ~/uploads/ inside the sandbox.">
+  <div id="uphdr">
+    <strong>Send file to sandbox</strong>
+    <button id="upbtn" type="button">Choose file…</button>
+  </div>
+  <div id="uphint">Use this when the SaaS asks you to attach a file. The file goes to <code>~/uploads/</code> inside the sandbox; then click the SaaS's own upload button and pick it from there.</div>
+  <div id="upmsg">No file sent yet.</div>
   <input id="upfile" type="file" style="display:none">
-  <button id="upbtn" type="button">Upload file</button>
-  <span id="upmsg">No file uploaded yet.</span>
 </div>
 
 <script>
@@ -117,18 +125,21 @@ ATTACH_HTML = """<!doctype html>
     const f = inp.files && inp.files[0];
     if (!f) return;
     btn.disabled = true;
-    msg.textContent = 'Uploading ' + f.name + '…';
+    msg.classList.remove('err');
+    msg.textContent = 'Sending ' + f.name + '…';
     try {
       const fd = new FormData();
       fd.append('file', f, f.name);
       const r = await fetch('/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
+        msg.classList.add('err');
         msg.textContent = 'Failed: ' + (j.detail || r.status);
       } else {
-        msg.textContent = 'Stored as ' + j.name + ' (' + Math.round(j.size/1024) + ' KB)';
+        msg.textContent = '✓ ' + j.name + ' (' + Math.round(j.size/1024) + ' KB) → ~/uploads/';
       }
     } catch (e) {
+      msg.classList.add('err');
       msg.textContent = 'Error: ' + e;
     } finally {
       btn.disabled = false;

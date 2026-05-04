@@ -29,7 +29,11 @@ resource waf 'Microsoft.Network/FrontDoorWebApplicationFirewallPolicies@2024-02-
     policySettings: {
       enabledState: 'Enabled'
       mode: 'Prevention'
-      requestBodyCheck: 'Enabled'
+      // Disabled: WAF caps inspected body at 128 KB and 403s anything larger,
+      // which breaks /upload (multipart up to upload_max_bytes). Body
+      // validation (MIME allowlist, size caps, sha256) is enforced by the
+      // broker itself in broker/app/upload.py.
+      requestBodyCheck: 'Disabled'
     }
     managedRules: {
       managedRuleSets: [
