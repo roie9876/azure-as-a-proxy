@@ -101,9 +101,9 @@ fi
 if [[ "${SKIP_HEALTH_WAIT:-0}" == "1" ]]; then
   echo "[6/6] SKIP_HEALTH_WAIT=1 — not polling /healthz"
 else
-  echo "[6/6] Polling https://${FD_EP}/healthz (up to 12 min for FD propagation)..."
+  echo "[6/6] Polling https://${FD_EP}/healthz (up to 25 min for FD propagation)..."
   ok=0
-  for i in $(seq 1 72); do
+  for i in $(seq 1 150); do
     code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "https://${FD_EP}/healthz" || true)
     if [[ "$code" == "200" ]]; then
       echo "    [$i] HTTP 200 — broker is reachable"
@@ -114,7 +114,7 @@ else
     sleep 10
   done
   if [[ "$ok" != "1" ]]; then
-    echo "    WARN: /healthz did not return 200 within 12 min."
+    echo "    WARN: /healthz did not return 200 within 25 min."
     echo "    Check: az containerapp logs show -g $RG -n $BROKER_APP --tail 50"
     exit 1
   fi
