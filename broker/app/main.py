@@ -38,9 +38,8 @@ from .middleware import HeaderHygieneMiddleware
 from .secrets_bag import bag
 from .sessions import (
     allocate_sandbox,
-    consume_attach,
     destroy_sandbox,
-    mint_attach_token,
+    sandbox_for_user,
     start_warmer,
     stop_warmer,
 )
@@ -110,10 +109,10 @@ ATTACH_HTML = """<!doctype html>
 <style>html,body,iframe{margin:0;padding:0;height:100%;width:100%;background:#000;border:0}</style>
 </head>
 <body>
-<!-- Streamer attaches via WebSocket; the iframe loads the streamer's own client UI
-     served by the sandbox over our WS proxy. The iframe src is same-origin, so
-     F12 only sees portal.contoso.com. -->
-<iframe src="/streamer.html?t=__TOKEN__"></iframe>
+<!-- noVNC client served by sandbox's websockify; reverse-proxied through the
+     broker so the user's browser only ever talks to the cloak's domain.
+     /websockify is the same-origin WS upgrade target. -->
+<iframe src="/vnc.html?autoconnect=1&resize=remote&path=websockify"></iframe>
 </body>
 </html>"""
 
@@ -130,9 +129,20 @@ async def root(request: Request):
 @app.get("/login")
 async def login(request: Request):
     if settings.stub_auth:
-        # PoC: instant login as stub user.
-        u = stub_user()
+        # PoC: per-browser identity. Each browser gets its own UUID cookie ->
+        # its own sandbox. Two browsers = two ACIs = no cross-contamination
+        # (README §3 / §4.2 step 2). Replaced when real OIDC is configured.
+        import uuid
+        browser_id = request.cookies.get("cloak_browser_id")
+        if not browser_id:
+            browser_id = uuid.uuid4().hex
+        u = AuthedUser(sub=browser_id, email=f"{browser_id[:8]}@stub.local")
         resp = RedirectResponse("/session", status_code=303)
+        resp.set_cookie(
+            "cloak_browser_id", browser_id,
+            httponly=True, secure=True, samesite="lax", path="/",
+            max_age=60 * 60 * 8,  # 8h
+        )
         resp.set_cookie(
             SESSION_COOKIE, issue_session_cookie(u),
             httponly=True, secure=True, samesite="lax", path="/",
@@ -185,52 +195,110 @@ async def logout(request: Request):
 @app.get("/session", response_class=HTMLResponse)
 async def session_page(request: Request):
     user = require_user(request)
-    rec = await allocate_sandbox(user.sub)
-    token = mint_attach_token(rec)
-    return HTMLResponse(ATTACH_HTML.replace("__TOKEN__", token))
+    await allocate_sandbox(user.sub)
+    return HTMLResponse(ATTACH_HTML)
 
 
-# ---------- WebSocket proxy: user <-> sandbox ----------
-@app.websocket("/attach")
-async def attach_ws(ws: WebSocket, token: str = ""):
-    rec = consume_attach(token)
-    if not rec:
+# ---------- Reverse proxy: broker -> Kasm sandbox (HTTP + WebSocket) ----------
+# Kasm Chromium serves its noVNC UI on https://<aci-ip>:6901 (self-signed cert)
+# and the websockify VNC stream at wss://<aci-ip>:6901/websockify.
+# We expose both same-origin under the broker so the user's browser only ever
+# talks to portal.contoso.com.
+
+# Hop-by-hop headers we must NOT forward.
+_HOP_BY_HOP = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade", "host",
+}
+
+
+def _resolve_sandbox_base(request: Request) -> str:
+    """Return the upstream base URL for the authenticated user's sandbox."""
+    user = require_user(request)
+    sb = sandbox_for_user(user.sub)
+    if not sb or not sb.private_ip:
+        # No sandbox yet — kick the user back to /session to allocate.
+        raise HTTPException(status_code=409, detail="no sandbox; visit /session first")
+    return f"{settings.sandbox_scheme}://{sb.private_ip}:{settings.sandbox_port}"
+
+
+@app.websocket("/websockify")
+async def websockify_proxy(ws: WebSocket):
+    """Pixel-stream WebSocket: browser -> broker -> Kasm websockify."""
+    # Validate session cookie BEFORE accept(); WebSocket carries cookies.
+    user = read_session_cookie(ws)  # type: ignore[arg-type]
+    if not user:
         await ws.close(code=4401)
         return
-    await ws.accept()
+    sb = sandbox_for_user(user.sub)
+    if not sb or not sb.private_ip:
+        await ws.close(code=4404)
+        return
 
-    # Open an upstream WS to the sandbox via the Dynamic Sessions proxy URL.
-    # Note: the Dynamic Sessions proxy supports HTTP CONNECT-style upgrades.
+    upstream_url = (
+        f"wss://{sb.private_ip}:{settings.sandbox_port}/websockify"
+        if settings.sandbox_scheme == "https"
+        else f"ws://{sb.private_ip}:{settings.sandbox_port}/websockify"
+    )
+
+    import ssl as _ssl
     import websockets
 
-    auth_token = await _bearer_for_sandbox()
-    upstream_url = rec.sandbox_url.replace("https://", "wss://").replace("http://", "ws://")
+    ssl_ctx = _ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = _ssl.CERT_NONE
+
+    # Echo only the subprotocol the client actually requested. noVNC modern
+    # builds send NO subprotocols; older builds send 'binary'. Forcing 'binary'
+    # when the client didn't ask causes the browser to close on protocol mismatch.
+    requested_protocols = [
+        p.strip() for p in ws.headers.get("sec-websocket-protocol", "").split(",") if p.strip()
+    ]
+    chosen = "binary" if "binary" in requested_protocols else None
+    upstream_subprotocols = [chosen] if chosen else None
+    await ws.accept(subprotocol=chosen)
 
     try:
         async with websockets.connect(
             upstream_url,
-            extra_headers={"Authorization": f"Bearer {auth_token}"},
+            ssl=ssl_ctx if settings.sandbox_scheme == "https" else None,
+            subprotocols=upstream_subprotocols,
             max_size=None,
+            open_timeout=10,
+            ping_interval=20,
+            ping_timeout=20,
         ) as upstream:
             async def pump_up():
                 try:
                     while True:
-                        data = await ws.receive_bytes()
-                        await upstream.send(data)
+                        msg = await ws.receive()
+                        if msg["type"] == "websocket.disconnect":
+                            return
+                        if "bytes" in msg and msg["bytes"] is not None:
+                            await upstream.send(msg["bytes"])
+                        elif "text" in msg and msg["text"] is not None:
+                            await upstream.send(msg["text"])
                 except WebSocketDisconnect:
-                    pass
+                    return
 
             async def pump_down():
                 try:
-                    async for msg in upstream:
-                        if isinstance(msg, bytes):
-                            await ws.send_bytes(msg)
+                    async for m in upstream:
+                        if isinstance(m, bytes):
+                            await ws.send_bytes(m)
                         else:
-                            await ws.send_text(msg)
+                            await ws.send_text(m)
                 except Exception:  # noqa: BLE001
-                    pass
+                    return
 
-            await asyncio.gather(pump_up(), pump_down())
+            done, pending = await asyncio.wait(
+                {asyncio.create_task(pump_up()), asyncio.create_task(pump_down())},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+    except Exception as ex:  # noqa: BLE001
+        logger.warning("websockify proxy error: %s", ex)
     finally:
         try:
             await ws.close()
@@ -238,37 +306,74 @@ async def attach_ws(ws: WebSocket, token: str = ""):
             pass
 
 
-async def _bearer_for_sandbox() -> str:
-    # Reuse the same managed identity token used for sessions API.
-    from .sessions import _bearer_token  # local import to avoid cycle
-    return await _bearer_token()
+# Reusable client w/ disabled TLS verification (Kasm self-signed).
+_proxy_client: httpx.AsyncClient | None = None
 
 
-# ---------- Streamer client passthrough ----------
-# The Kasm-in-sandbox streamer serves its own JS/HTML on path `/`. We proxy minimal
-# static assets through the broker so that the user's browser only ever talks to
-# `portal.contoso.com`. For a true PoC we deliver a stub page that opens the WS;
-# in production replace with a same-origin Kasm client bundle copied into /static.
-STREAMER_HTML = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Workspace</title>
-<meta name="referrer" content="no-referrer">
-<style>html,body{margin:0;height:100%;background:#000;color:#888;font-family:system-ui,sans-serif}
-#log{position:fixed;bottom:8px;left:8px;font-size:11px;opacity:.6}</style>
-</head><body>
-<canvas id="screen" width="1920" height="1080" style="width:100%;height:100%;display:block"></canvas>
-<div id="log">connecting...</div>
-<script>
-// Minimal stub. Replace with a real Kasm/noVNC client bundle for PoC.
-const t = new URLSearchParams(location.search).get('t');
-const ws = new WebSocket(`wss://${location.host}/attach?token=${encodeURIComponent(t)}`);
-ws.binaryType = 'arraybuffer';
-ws.onopen = () => document.getElementById('log').textContent = 'connected';
-ws.onclose = () => document.getElementById('log').textContent = 'disconnected';
-ws.onerror = () => document.getElementById('log').textContent = 'error';
-</script></body></html>"""
+def _get_proxy_client() -> httpx.AsyncClient:
+    global _proxy_client
+    if _proxy_client is None:
+        _proxy_client = httpx.AsyncClient(
+            verify=False,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            follow_redirects=False,
+            http2=False,
+        )
+    return _proxy_client
 
 
-@app.get("/streamer.html", response_class=HTMLResponse)
-async def streamer(request: Request, t: str = ""):
-    require_user(request)
-    return HTMLResponse(STREAMER_HTML)
+# Paths reserved by the broker — never proxied to the sandbox.
+_BROKER_PATHS = {
+    "", "healthz", "readyz", "login", "logout", "session", "auth/callback",
+    "websockify", "favicon.ico",
+}
+
+
+@app.api_route(
+    "/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    include_in_schema=False,
+)
+async def reverse_proxy(path: str, request: Request):
+    """Catchall HTTP reverse proxy → Kasm noVNC assets (vnc.html, app/, core/, ...)."""
+    if path in _BROKER_PATHS:
+        # Should have been matched by an explicit route already; if it gets here
+        # that means the explicit route 404'd. Return 404 directly.
+        raise HTTPException(status_code=404)
+
+    base = _resolve_sandbox_base(request)
+    upstream_url = f"{base}/{path}"
+    if request.url.query:
+        upstream_url = f"{upstream_url}?{request.url.query}"
+
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP
+    }
+    # Kasm doesn't care about Host; let httpx set it from URL.
+    fwd_headers.pop("host", None)
+
+    body = await request.body()
+    client = _get_proxy_client()
+
+    try:
+        upstream = await client.request(
+            request.method,
+            upstream_url,
+            headers=fwd_headers,
+            content=body if body else None,
+        )
+    except httpx.RequestError as ex:
+        logger.warning("upstream proxy error %s: %s", upstream_url, ex)
+        raise HTTPException(status_code=502, detail="sandbox unreachable") from ex
+
+    resp_headers = {
+        k: v for k, v in upstream.headers.items()
+        if k.lower() not in _HOP_BY_HOP and k.lower() != "content-length"
+    }
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=resp_headers,
+        media_type=upstream.headers.get("content-type"),
+    )

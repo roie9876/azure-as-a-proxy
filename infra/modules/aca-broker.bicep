@@ -14,10 +14,15 @@ param acaEnvironmentId string
 param brokerImage string
 @description('Key Vault name (for RBAC + reference).')
 param keyVaultName string
-@description('Sandbox container image (Kasm Chromium) for ACI provisioning.')
+@description('Sandbox container image for ACI provisioning (custom kiosk: Xvfb+x11vnc+websockify+noVNC+Chromium).')
 param sandboxImage string
 @description('Subnet ID for sandbox ACIs (delegated to Microsoft.ContainerInstance/containerGroups).')
 param sandboxSubnetId string
+@description('Target SaaS URL pinned per sandbox. Passed to kiosk Chromium as --app=$SAAS_URL.')
+param saasUrl string
+@description('\'1\' = ignore TLS errors for SAAS_URL (PoC against self-signed); \'0\' = strict TLS verification.')
+@allowed([ '0', '1' ])
+param insecureSaas string = '0'
 @description('OIDC issuer URL (empty = stub auth).')
 param oidcIssuer string
 @description('OIDC client ID (empty = stub auth).')
@@ -94,6 +99,8 @@ resource broker 'Microsoft.App/containerApps@2024-10-02-preview' = {
             { name: 'AZURE_LOCATION', value: location }
             { name: 'SANDBOX_IMAGE', value: sandboxImage }
             { name: 'SANDBOX_SUBNET_ID', value: sandboxSubnetId }
+            { name: 'SAAS_URL', value: saasUrl }
+            { name: 'INSECURE_SAAS', value: insecureSaas }
             { name: 'ACR_NAME', value: acrName }
             { name: 'ACR_SERVER', value: useAcr ? '${acrName}.azurecr.io' : '' }
             { name: 'ACR_USERNAME', value: useAcr ? acr.listCredentials().username : '' }

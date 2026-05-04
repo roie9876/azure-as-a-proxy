@@ -51,11 +51,18 @@ param tags object = {
 @description('Address space for the hub VNet (CIDR /20 or larger).')
 param vnetAddressSpace string = '10.80.0.0/20'
 
-@description('Container image for the session broker (FastAPI). Set after ACR push.')
-param brokerImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
+@description('Container image for the session broker (FastAPI). Build via scripts/build-and-push.sh and pin to a tag (or digest).')
+param brokerImage string
 
-@description('Container image for the sandbox (Kasm Chromium). Set after ACR push.')
-param sandboxImage string = 'kasmweb/chromium:1.16.0'
+@description('Container image for the per-browser sandbox (custom kiosk: Xvfb+x11vnc+websockify+noVNC+Chromium). Build via scripts/build-and-push.sh and pin to a tag (or digest).')
+param sandboxImage string
+
+@description('Target SaaS URL pinned per sandbox. Chromium kiosk loads --app=$SAAS_URL on start. Required.')
+param saasUrl string
+
+@description('Set to "1" to ignore TLS errors for $SAAS_URL inside the kiosk Chromium (PoC against self-signed origins). Set to "0" for CA-signed origins in production.')
+@allowed([ '0', '1' ])
+param insecureSaas string = '0'
 
 @description('Name of the ACR (in same subscription) hosting the broker/sandbox images. Empty = images are public.')
 param acrName string = ''
@@ -148,6 +155,8 @@ module broker 'modules/aca-broker.bicep' = {
     keyVaultName: keyvault.outputs.keyVaultName
     sandboxImage: sandboxImage
     sandboxSubnetId: network.outputs.sessionsSubnetId
+    saasUrl: saasUrl
+    insecureSaas: insecureSaas
     oidcIssuer: oidcIssuer
     oidcClientId: oidcClientId
     userAllowlist: userAllowlist

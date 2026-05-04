@@ -3,6 +3,8 @@
 > **Goal:** Let a fixed population of corporate users (count: X) access an unknown third-party SaaS *without* the user being able to determine the destination's network identity (URL, DNS, tenant ID, headers, cookies, body) from any tool on their endpoint.
 >
 > **Scope:** This document covers **Path A** only — hide network identity. The user will still see the SaaS's rendered UI (branding visible). See §6 for what is explicitly out of scope.
+>
+> **Status:** Deployed PoC in Sweden Central. Public entry: `https://ep-cloak-f8fvdsf2eqd7gthx.b02.azurefd.net/`. SaaS pinned for the demo: `https://arh2b5deb8dmcvcf.fz37.alb.azure.com/`. Side-by-side DevTools proof: [docs/F12-cloaking-test.md](docs/F12-cloaking-test.md). Customer-facing brief: [docs/CUSTOMER-BRIEF.md](docs/CUSTOMER-BRIEF.md).
 
 ---
 
@@ -55,51 +57,53 @@ To regenerate the PNG after editing the `.drawio`:
 
 | Layer | Service | Role |
 |---|---|---|
-| Public surface | **Azure Front Door Premium** + WAF + DDoS Std | TLS termination at `portal.contoso.com`, your cert, anycast, WAF |
-| Auth gate | **Session Broker** (Azure Container Apps) | OIDC login (non-Entra IdP), allocates sandbox, issues signed session URL |
-| Per-user sandbox | **Azure Container Apps — Dynamic Sessions** | Hyper-V isolated, 1 sandbox = 1 user, destroyed on logout. Custom container = Chromium + streaming server (Kasm / Neko / similar) |
+| Public surface | **Azure Front Door Premium** + WAF + DDoS Std | TLS termination at the FD endpoint (custom domain in production), your cert, anycast, WAF |
+| Auth gate | **Session Broker** (Azure Container Apps, FastAPI) | OIDC login (or stub + per-browser cookie identity for PoC), allocates sandbox, mints attach token, proxies WebSocket → noVNC |
+| Per-browser sandbox | **Azure Container Instances** (custom kiosk image in our ACR) | One ACI per browser, private-IP-only on a delegated subnet, destroyed on logout. Custom 250 MB image: Debian 12-slim + Xvfb + fluxbox + x11vnc + websockify + bundled noVNC + Chromium `--kiosk --app=$SAAS_URL` |
 | Egress | **NAT Gateway + Standard Public IP** (or `/29` Public IP Prefix) | Stable Azure egress IP visible to the SaaS |
-| DNS | **Azure DNS Private Resolver** | Region-consistent DNS resolution |
-| Secrets | **Key Vault** | OIDC client secret, session-token signing keys |
-| Identity | **External IdP** (Auth0 / Okta / Keycloak — customer choice) | Non-Entra OIDC for who can reach the cloak |
+| DNS | **Azure DNS Private Resolver** | Region-consistent DNS resolution for the sandbox subnet |
+| Secrets | **Key Vault** + Private Endpoint | OIDC client secret, broker session-signing secret |
+| Identity | **External IdP** (Auth0 / Okta / Keycloak — customer choice) for production; cookie-based stub (`cloak_browser_id` UUID, 8 h) for PoC | Non-Entra OIDC for who can reach the cloak |
 | Observability | **Log Analytics** + Front Door / ACA diagnostics | Audit + troubleshooting |
 
 **Region:** Pick an Azure region appropriate to the customer's data-residency, latency, and SaaS-allowlisting needs. The egress region does **not** have to match the user region; in many cloaking deployments it deliberately doesn't.
 
+> **Why ACI instead of ACA Dynamic Sessions?** Dynamic Sessions disallows the privileged-mode operations a kiosk container needs (its own X server / init). We pivoted to per-browser Azure Container Instances on a delegated subnet inside the same VNet, orchestrated by the broker via ARM REST. See [docs/CUSTOMER-BRIEF.md §4](docs/CUSTOMER-BRIEF.md) for the full rationale.
+
 ### How a session flows
 
-1. User opens `https://portal.contoso.com` → Front Door → Session Broker.
-2. Broker bounces user to external IdP for OIDC login → user returns with a signed session token.
-3. Broker calls **ACA Dynamic Sessions API** to allocate a fresh isolated sandbox for that user.
-4. Broker returns a signed connect URL pointing at the sandbox's streamer endpoint, fronted via Front Door.
-5. User's browser opens a **WebSocket** to the streamer; sees only pixels / virtualized DOM.
-6. Inside the sandbox, Chromium navigates to the real SaaS, performs whatever auth the SaaS demands (password, MFA, SAML, OIDC, passkey if streamer supports WebAuthn forwarding).
-7. SaaS sees the **NAT Gateway public IP** (Azure-owned, in the chosen egress region) — never the corp IP, never the user.
-8. On logout/idle/timeout the sandbox is destroyed. Next session = fresh sandbox.
+1. User opens the Front Door endpoint → Front Door → Session Broker (via Private Link to the ACA env).
+2. Broker authenticates the user. Production: OIDC redirect to external IdP. PoC: stub auth that issues an HttpOnly `cloak_browser_id` UUID cookie — each browser becomes a distinct identity, transparent to swap for a real `sub` claim later.
+3. Broker pops a pre-warmed ACI from the **warm pool** (or provisions a new one) and marks it claimed for that user.
+4. Broker returns an HTML page that opens a noVNC client in an iframe; the client opens a **WebSocket** at `wss://<fd>/websockify` which the broker proxies to the sandbox ACI's websockify endpoint.
+5. Inside the sandbox, Chromium `--kiosk --app=$SAAS_URL` is already loaded against the real SaaS. With `INSECURE_SAAS=1` (default for the self-signed demo origin) the cert-error interstitial is suppressed inside the streamed pixels. Auth to the SaaS happens here, with whatever the SaaS demands.
+6. SaaS sees the **NAT Gateway public IP** (Azure-owned, in the chosen egress region) — never the corp IP, never the user.
+7. On logout / idle / timeout / WS close the broker calls ARM `DELETE` on the ACI; the warmer provisions a replacement. Next session = fresh ACI.
 
 ### 4.1 Session Broker — why it has to exist
 
-The Session Broker is **not** an Azure product. It's a small custom service hosted as a regular Azure Container App (1 container image, 2–5 replicas behind ACA's internal ingress) and is the only thing Azure Front Door exposes publicly.
+The Session Broker is **not** an Azure product. It's a small custom service ([broker/](broker/)) hosted as a regular Azure Container App (1 container image, 1–5 replicas behind ACA's internal ingress) and is the only thing Azure Front Door exposes publicly.
 
-ACA Dynamic Sessions provides an API to spin up and destroy a Hyper-V isolated sandbox per call, but it does **not** know:
+Azure Container Instances offers a REST API to spin up / destroy a single-tenant Hyper-V isolated container per call, but it does **not** know:
 
 - *who* the user is — there is no built-in authentication
 - *which* sandbox belongs to which user
 - how to hand the user a one-time URL to attach to their sandbox
 - when to destroy the sandbox
+- how to keep an idle warm pool to hide the ~60 s cold-start cost
 
-The broker fills that gap. Without it, there is no auth boundary, no per-user mapping, and no lifecycle control over the sandbox pool.
+The broker fills that gap. Without it, there is no auth boundary, no per-user mapping, no warm pool, and no lifecycle control over the sandbox fleet.
 
 ### 4.2 Session Broker — responsibilities
 
-1. **Terminate the user session** — receives the HTTPS request from Front Door at `portal.contoso.com` over Private Link.
-2. **Authenticate** the user via the external IdP (OIDC redirect to Auth0 / Okta / Keycloak).
-3. **Authorize** — verify the user is in the allowlist group (≈ X users).
-4. **Allocate a sandbox** — call the ACA Dynamic Sessions REST API (`POST .../sessionPools/{name}/sessions`) using a managed identity; receive `sessionId` + internal endpoint.
-5. **Mint a short-lived signed token** (HS256/RS256, key from Key Vault) bound to `(userId, sessionId, exp ≈ 30s)`.
-6. **Redirect** the browser to `wss://portal.contoso.com/attach?token=…`. Front Door routes the WebSocket upgrade through Private Link back to the broker, which proxies it into the sandbox's Kasm/Neko streamer.
-7. **Track lifecycle** — accept heartbeat from the sandbox; on logout / idle timeout / tab close, call `DELETE .../sessions/{id}` so ACA tears the Hyper-V VM down.
-8. **Emit audit logs** — `userId → sessionId → start/stop time → egress IP` to Log Analytics.
+1. **Terminate the user session** — receives the HTTPS / WSS request from Front Door over Private Link.
+2. **Authenticate** the user. Production: OIDC redirect to the external IdP (Auth0 / Okta / Keycloak). PoC: stub login at `/login` issues an HttpOnly `cloak_browser_id` UUID cookie (8 h) which becomes the user's `sub`.
+3. **Authorize** — verify the user is in the allowlist group (≈ X users) when OIDC is enabled.
+4. **Allocate a sandbox** — pop one ACI from the warm pool (`_idle_pool`); if empty, create one synchronously via ARM `PUT .../containerGroups/{name}` using the broker's managed identity. Map `(userId → sandboxName)` so repeat visits from the same browser reuse their sandbox.
+5. **Return the attach page** — broker emits an HTML page containing a noVNC iframe pointing at `/vnc.html?autoconnect=1&resize=remote&path=websockify`.
+6. **Proxy the WebSocket** — the noVNC client opens `wss://<fd>/websockify`. Broker authenticates the request against the user's session cookie, then proxies frames to the claimed ACI's `:6901/websockify` endpoint.
+7. **Track lifecycle** — on logout / idle timeout / WS close, broker calls ARM `DELETE` on the container group; warmer loop provisions a replacement to keep the pool at `WARM_POOL_SIZE`.
+8. **Emit audit logs** — `userId → sandboxName → start/stop time → egress IP` to Log Analytics.
 
 **Why a Container App and not a Function or VM:**
 
@@ -123,17 +127,22 @@ In one line: **the broker is the auth + sandbox-lifecycle controller that turns 
 
 ## 5. What the user can and cannot see — the cloaking promise
 
+Verified against a 77-entry HAR captured from the live deployment. Full side-by-side comparison: [docs/F12-cloaking-test.md](docs/F12-cloaking-test.md).
+
 | Vector | What user sees | Cloaked? |
 |---|---|---|
-| Browser URL bar | `portal.contoso.com/session/{id}` | ✅ |
-| DevTools → Network tab | WebSocket frames to `portal.contoso.com` only | ✅ |
-| DevTools → DOM / Elements | Streamer canvas / `<video>` element | ✅ |
-| `View Source` | Streamer client HTML, no SaaS markup | ✅ |
-| Browser cookies / IndexedDB / localStorage | Only fronting domain artifacts | ✅ |
-| `nslookup` / OS DNS cache | Only `portal.contoso.com` | ✅ |
+| Browser URL bar | Front Door endpoint only (`*.azurefd.net` or custom domain) | ✅ |
+| TLS certificate | Microsoft-issued AFD cert (or your custom cert) | ✅ |
+| DevTools → Network tab | Only requests to the Front Door endpoint (0/77 to the SaaS); 1 long-lived WebSocket carrying VNC framebuffer frames | ✅ |
+| HTTP response headers | Only broker + FD headers. `server`, `x-powered-by`, `x-nextjs-*`, `etag`, origin `cache-control`, `vary: rsc,next-router-…` — all absent | ✅ |
+| DevTools → DOM / Elements | noVNC client + a single `<canvas>`; no SaaS markup | ✅ |
+| `View Source` | noVNC client HTML, no SaaS markup | ✅ |
+| Browser cookies / IndexedDB / localStorage | Only broker session cookie + `cloak_browser_id` UUID; nothing from the SaaS | ✅ |
+| `nslookup` / OS DNS cache | Only the FD endpoint hostname | ✅ |
 | Wireshark / `tcpdump` on user's laptop | Only TLS to Front Door anycast IPs | ✅ |
-| Process memory of user's browser | Streamer state only — no SaaS HTML/JS/tokens | ✅ |
+| Process memory of user's browser | noVNC state only — no SaaS HTML/JS/tokens | ✅ |
 | OS-level packet capture | Same as Wireshark — Front Door only | ✅ |
+| Cert-error interstitial leaking SaaS hostname inside the pixels | Suppressed via `INSECURE_SAAS=1` (scoped to `$SAAS_URL`) | ✅ |
 | **Rendered pixels of the SaaS UI** | **The actual SaaS UI** — logos, layout, colors, data | ❌ — out of scope (R3) |
 | Screenshot the screen | The SaaS UI is captured | ❌ |
 | OCR a screenshot | Tenant name in the rendered text could be extracted | ❌ |
@@ -249,3 +258,9 @@ Only after all 6 pass → build production environment, broker, hardened image, 
 | `README.md` | This document |
 | `topology.drawio` | Editable architecture diagram (open in draw.io) |
 | `topology.png` | Rendered topology image referenced in §1 |
+| [`docs/CUSTOMER-BRIEF.md`](docs/CUSTOMER-BRIEF.md) | Customer-facing briefing: leak inventory, mitigation table, components, costs, lessons |
+| [`docs/F12-cloaking-test.md`](docs/F12-cloaking-test.md) | Side-by-side DevTools/F12 comparison: direct-to-SaaS vs. via Cloak/AFD, with reproduction recipe |
+| [`infra/`](infra/) | Subscription-scoped Bicep (network, FD, ACA env, broker, KV, observability) |
+| [`broker/`](broker/) | FastAPI session broker source (auth, pool, ARM client, websockify proxy) |
+| [`sandbox/`](sandbox/) | Custom kiosk container (Dockerfile + entrypoint.sh) |
+| [`scripts/`](scripts/) | `build-and-push.sh`, `deploy.sh`, `smoke-test.sh` |

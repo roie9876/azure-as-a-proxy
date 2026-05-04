@@ -16,9 +16,13 @@ class Settings(BaseSettings):
     azure_resource_group: str = Field("")
     azure_location: str = Field("swedencentral")
 
-    # Sandbox image (Kasm Chromium) deployed as ACI per session
+    # Sandbox image (kiosk Chromium) deployed as ACI per session
     sandbox_image: str = Field("")
     sandbox_subnet_id: str = Field("", description="VNet subnet (delegated to Microsoft.ContainerInstance/containerGroups)")
+
+    # SaaS URL the sandbox Chromium opens in --kiosk --app=<URL>.
+    # README §4 step 6: sandbox is a fresh Chromium pointed at the SaaS.
+    saas_url: str = Field("https://example.com", description="Target SaaS URL pinned per sandbox")
 
     # ACR creds for sandbox image pull (passed to ACI imageRegistryCredentials)
     acr_name: str = Field("")
@@ -28,6 +32,15 @@ class Settings(BaseSettings):
 
     # Warm pool: keep N idle sandboxes ready for instant alloc
     warm_pool_size: int = Field(2, ge=0, le=20)
+
+    # VNC password for Kasm sandbox (broker proxies, user never types it).
+    # PoC: single shared value injected into every ACI as VNC_PW.
+    sandbox_vnc_password: str = Field("cloak-poc-vnc")
+
+    # Sandbox serves noVNC + websockify on the same HTTP port.
+    # accetto/ubuntu-vnc-xfce-chromium-g3 → http://:6901
+    sandbox_port: int = Field(6901)
+    sandbox_scheme: str = Field("http")
 
     # Key Vault (managed identity is used for auth)
     key_vault_name: str = Field("")

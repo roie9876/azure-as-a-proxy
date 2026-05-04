@@ -61,23 +61,19 @@ def _container_group_body(name: str) -> dict:
                     "properties": {
                         "image": settings.sandbox_image,
                         "resources": {"requests": {"cpu": 2.0, "memoryInGB": 4.0}},
-                        "ports": [{"protocol": "TCP", "port": 6901}],
+                        "ports": [{"protocol": "TCP", "port": settings.sandbox_port}],
                         "environmentVariables": [
-                            {"name": "VNC_PW", "value": "unused-internal-only"},
+                            {"name": "SAAS_URL", "value": settings.saas_url},
                             {"name": "LANG", "value": "en_US.UTF-8"},
                             {"name": "TZ", "value": "Europe/Stockholm"},
-                            {
-                                "name": "CHROME_USER_AGENT",
-                                "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-                            },
-                            {"name": "CHROME_ACCEPT_LANG", "value": "en-US,en;q=0.9"},
+                            {"name": "SCREEN_GEOMETRY", "value": "1920x1080x24"},
                         ],
                     },
                 }
             ],
             "ipAddress": {
                 "type": "Private",
-                "ports": [{"protocol": "TCP", "port": 6901}],
+                "ports": [{"protocol": "TCP", "port": settings.sandbox_port}],
             },
         },
     }
@@ -155,7 +151,7 @@ async def _poll_until_running(sb: Sandbox, timeout: float = 180.0) -> bool:
         props = data.get("properties", {})
         ig_state = props.get("instanceView", {}).get("state") or props.get("provisioningState")
         ip = props.get("ipAddress", {}).get("ip")
-        if ip and ig_state in ("Running", "Succeeded"):
+        if ip and ip != "0.0.0.0" and ig_state in ("Running", "Succeeded"):
             sb.private_ip = ip
             sb.state = "Running"
             return True
@@ -255,7 +251,7 @@ async def allocate_sandbox(user_sub: str) -> AttachRecord:
             _claimed[name] = sb
             _user_to_sandbox[user_sub] = name
 
-    sandbox_url = f"http://{sb.private_ip}:6901"
+    sandbox_url = f"{settings.sandbox_scheme}://{sb.private_ip}:{settings.sandbox_port}"
     attach = _secrets.token_urlsafe(32)
     rec = AttachRecord(
         user_sub=user_sub,
@@ -278,6 +274,14 @@ def mint_attach_token(rec: AttachRecord) -> str:
     tok = _secrets.token_urlsafe(32)
     _attach_store[tok] = rec
     return tok
+
+
+def sandbox_for_user(user_sub: str) -> Optional[Sandbox]:
+    """Return the claimed sandbox for a user, or None if not allocated."""
+    name = _user_to_sandbox.get(user_sub)
+    if not name:
+        return None
+    return _claimed.get(name)
 
 
 async def destroy_sandbox(user_sub: str) -> None:

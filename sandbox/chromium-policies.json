@@ -1,5 +1,5 @@
 {
-  "_comment": "Chromium managed policies — pin User-Agent, language, disable WebRTC IP leak, disable DoH (use system DNS via Azure DNS Private Resolver in egress region).",
+  "_comment": "Chromium managed policies — kiosk lockdown + fingerprint normalization.",
 
   "BrowserSignin": 0,
   "SyncDisabled": true,
@@ -12,6 +12,26 @@
   "SafeBrowsingProtectionLevel": 0,
   "PromotionalTabsEnabled": false,
   "DefaultBrowserSettingEnabled": false,
+
+  "DeveloperToolsAvailability": 2,
+  "DownloadRestrictions": 3,
+  "PrintingEnabled": false,
+  "IncognitoModeAvailability": 1,
+  "BookmarkBarEnabled": false,
+  "EditBookmarksEnabled": false,
+  "ImportBookmarks": false,
+  "ImportHistory": false,
+  "ImportSavedPasswords": false,
+  "ImportSearchEngine": false,
+  "DefaultClipboardSetting": 2,
+  "DefaultNotificationsSetting": 2,
+  "DefaultGeolocationSetting": 2,
+  "DefaultPopupsSetting": 2,
+  "DefaultSensorsSetting": 2,
+  "DefaultSerialGuardSetting": 2,
+  "DefaultWebUsbGuardSetting": 2,
+  "FullscreenAllowed": true,
+  "ForceEphemeralProfiles": true,
 
   "WebRtcIPHandling": "disable_non_proxied_udp",
   "DnsOverHttpsMode": "off",

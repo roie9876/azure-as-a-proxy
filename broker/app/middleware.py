@@ -36,17 +36,19 @@ STRIP_HEADERS = {
 FORCE_HEADERS = {
     b"referrer-policy": b"no-referrer",
     b"x-content-type-options": b"nosniff",
-    b"x-frame-options": b"DENY",
+    b"x-frame-options": b"SAMEORIGIN",
     b"permissions-policy": b"camera=(), microphone=(), geolocation=(), interest-cohort=()",
-    # CSP: lock the portal page down. The streamer page only loads its own static assets
-    # plus the WSS to the same origin. Tighten further per your streamer's needs.
+    # CSP: lock the portal page down. The /session page hosts a same-origin iframe
+    # rendering /vnc.html (proxied from the sandbox), so frame-ancestors must allow 'self'.
+    # noVNC ships inline <script> bootstrap, so script-src must include 'unsafe-inline'.
     b"content-security-policy": (
         b"default-src 'self'; "
         b"img-src 'self' data: blob:; "
         b"style-src 'self' 'unsafe-inline'; "
-        b"script-src 'self'; "
-        b"connect-src 'self' wss:; "
-        b"frame-ancestors 'none'; "
+        b"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        b"connect-src 'self' wss: ws:; "
+        b"frame-src 'self'; "
+        b"frame-ancestors 'self'; "
         b"form-action 'self'; "
         b"base-uri 'none'"
     ),
