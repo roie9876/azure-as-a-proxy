@@ -47,10 +47,27 @@ def _aci_url(name: str) -> str:
     )
 
 
-def _container_group_body(name: str) -> dict:
+def _device_env(profile: str) -> list[dict]:
+    """Per-profile Chromium emulation env vars consumed by entrypoint.sh."""
+    if profile == "mobile" and settings.mobile_emulation_enabled:
+        return [
+            {"name": "DEVICE_PROFILE", "value": "mobile"},
+            {"name": "SCREEN_GEOMETRY", "value": settings.mobile_screen_geometry},
+            {"name": "CHROME_USER_AGENT", "value": settings.mobile_user_agent},
+            {"name": "DEVICE_SCALE_FACTOR", "value": str(settings.mobile_device_scale_factor)},
+        ]
+    return [
+        {"name": "DEVICE_PROFILE", "value": "desktop"},
+        {"name": "SCREEN_GEOMETRY", "value": settings.desktop_screen_geometry},
+        {"name": "CHROME_USER_AGENT", "value": settings.desktop_user_agent},
+        {"name": "DEVICE_SCALE_FACTOR", "value": "1"},
+    ]
+
+
+def _container_group_body(name: str, profile: str = "desktop") -> dict:
     body: dict = {
         "location": settings.azure_location,
-        "tags": {"project": "saas-network-identity-cloak", "managedBy": "broker", "name": name},
+        "tags": {"project": "saas-network-identity-cloak", "managedBy": "broker", "name": name, "profile": profile},
         "properties": {
             "osType": "Linux",
             "restartPolicy": "OnFailure",
@@ -69,7 +86,7 @@ def _container_group_body(name: str) -> dict:
                             {"name": "SAAS_URL", "value": settings.saas_url},
                             {"name": "LANG", "value": "en_US.UTF-8"},
                             {"name": "TZ", "value": "Europe/Stockholm"},
-                            {"name": "SCREEN_GEOMETRY", "value": "1920x1080x24"},
+                            *_device_env(profile),
                             {"name": "INBOX_PORT", "value": str(settings.sandbox_inbox_port)},
                             {"name": "INBOX_TOKEN", "value": settings.sandbox_inbox_token},
                             {
@@ -106,6 +123,7 @@ class Sandbox:
     private_ip: Optional[str] = None
     state: str = "Pending"  # Pending | Running | Claimed | Terminating
     claimed_by: Optional[str] = None
+    profile: str = "desktop"  # desktop | mobile (device emulation)
     created_at: float = field(default_factory=time.time)
 
 
@@ -140,10 +158,10 @@ async def _arm_request(method: str, url: str, json_body: Optional[dict] = None) 
     return r.status_code, data
 
 
-async def _create_aci(name: str) -> Sandbox:
-    sb = Sandbox(name=name, state="Pending")
+async def _create_aci(name: str, profile: str = "desktop") -> Sandbox:
+    sb = Sandbox(name=name, state="Pending", profile=profile)
     _pending[name] = sb
-    body = _container_group_body(name)
+    body = _container_group_body(name, profile)
     status, data = await _arm_request("PUT", _aci_url(name), body)
     if status >= 400:
         logger.error("ACI create %s failed: %s %s", name, status, data)
@@ -233,26 +251,39 @@ async def stop_warmer() -> None:
         _warmer_task = None
 
 
-async def allocate_sandbox(user_sub: str) -> AttachRecord:
-    """Claim a warm sandbox; if pool empty, provision on demand and wait."""
-    # Reuse if user already has one
+async def allocate_sandbox(user_sub: str, profile: str = "desktop") -> AttachRecord:
+    """Claim a warm sandbox; if pool empty, provision on demand and wait.
+
+    The warm pool is desktop-only (we can't pre-warm a device profile we don't
+    yet know). When the real client is a phone (`profile="mobile"`) we always
+    cold-provision a mobile-emulated sandbox so the SaaS renders its mobile UI.
+    """
+    if not settings.mobile_emulation_enabled:
+        profile = "desktop"
+
+    # Reuse if user already has one — but only if the device profile matches.
     existing = _user_to_sandbox.get(user_sub)
-    if existing and existing in _claimed:
+    if existing and existing in _claimed and _claimed[existing].profile == profile:
         sb = _claimed[existing]
     else:
+        if existing:
+            # Profile changed (e.g. user switched laptop -> phone): tear down
+            # the old sandbox so we can rebuild with the right emulation.
+            await destroy_sandbox(user_sub)
         async with _pool_lock:
             sb: Optional[Sandbox] = None
-            if _idle_pool:
+            # Mobile bypasses the desktop warm pool.
+            if profile == "desktop" and _idle_pool:
                 name, sb = _idle_pool.popitem()
                 sb.claimed_by = user_sub
                 sb.state = "Claimed"
                 _claimed[name] = sb
                 _user_to_sandbox[user_sub] = name
         if sb is None:
-            # Cold path: spin one up synchronously
-            logger.info("idle pool empty, cold-provisioning for %s", user_sub)
+            # Cold path: spin one up synchronously in the requested profile.
+            logger.info("cold-provisioning %s sandbox for %s", profile, user_sub)
             name = f"sbx-{int(time.time())}-{_secrets.token_hex(3)}"
-            sb = await _create_aci(name)
+            sb = await _create_aci(name, profile)
             ok = await _poll_until_running(sb)
             _pending.pop(name, None)
             if not ok:

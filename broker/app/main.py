@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 
 import httpx
@@ -81,22 +82,46 @@ ATTACH_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>Workspace</title>
+<!-- viewport is essential: without it phones render at ~980px desktop width
+     and shrink the whole page, hiding the upload control off-screen. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <style>
-  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;border:0;font-family:system-ui,sans-serif}
+  :root{--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px)}
+  html,body{margin:0;padding:0;height:100%;width:100%;background:#000;border:0;
+            font-family:system-ui,sans-serif;overflow:hidden}
   iframe{position:absolute;inset:0;height:100%;width:100%;border:0;background:#000}
-  #upbar{position:fixed;top:8px;right:8px;z-index:10;background:rgba(20,20,24,.88);
-         color:#eaeaea;border:1px solid #333;border-radius:8px;padding:8px 12px;
-         font-size:12px;display:flex;flex-direction:column;gap:6px;align-items:stretch;
-         backdrop-filter:blur(6px);max-width:360px}
+
+  /* Desktop / mouse: small floating card, top-right. */
+  #upbar{position:fixed;top:calc(8px + var(--safe-top));right:8px;z-index:10;
+         background:rgba(20,20,24,.88);color:#eaeaea;border:1px solid #333;border-radius:8px;
+         padding:8px 12px;font-size:12px;display:flex;flex-direction:column;gap:6px;
+         align-items:stretch;backdrop-filter:blur(6px);max-width:360px;box-sizing:border-box}
   #uphdr{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  #upbody{display:flex;flex-direction:column;gap:6px}
   #upbar button{background:#2a6df4;color:#fff;border:0;border-radius:5px;padding:6px 12px;
                 font-size:12px;cursor:pointer;font-weight:600}
   #upbar button:disabled{opacity:.5;cursor:wait}
+  #uptoggle{display:none;background:transparent;color:#9aa3b2;padding:0 4px;font-size:18px;
+            line-height:1;font-weight:700}
   #uphint{font-size:11px;color:#9aa3b2;line-height:1.35}
   #upmsg{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7fd49a}
   #upmsg.err{color:#ff8a8a}
   #upbar.hidden{display:none}
+
+  /* Phones / touch: dock to the bottom edge, full width, big tap targets.
+     Collapsible so it never permanently covers the SaaS UI. */
+  @media (max-width:640px),(pointer:coarse){
+    #upbar{top:auto;left:0;right:0;bottom:0;max-width:none;border-radius:14px 14px 0 0;
+           border-left:0;border-right:0;border-bottom:0;
+           padding:10px 14px calc(10px + var(--safe-bottom)) 14px;gap:10px}
+    #upbar button{padding:14px 16px;font-size:15px;border-radius:10px;min-height:48px}
+    #upbtn{width:100%}
+    #uptoggle{display:inline-block;width:auto;min-height:auto;padding:4px 10px}
+    #uphint{font-size:13px}
+    #upmsg{font-size:13px;white-space:normal}
+    #upbar.collapsed #upbody{display:none}
+  }
 </style>
 </head>
 <body>
@@ -105,21 +130,30 @@ ATTACH_HTML = """<!doctype html>
      /websockify is the same-origin WS upgrade target. -->
 <iframe src="/vnc.html?autoconnect=1&resize=remote&path=websockify"></iframe>
 
-<div id="upbar" title="Send a file from your laptop into the sandbox so the SaaS file-picker can attach it. Files are saved under ~/uploads/ inside the sandbox.">
+<div id="upbar" title="Send a file from your device into the sandbox so the SaaS file-picker can attach it. Files are saved under ~/uploads/ inside the sandbox.">
   <div id="uphdr">
     <strong>Send file to sandbox</strong>
-    <button id="upbtn" type="button">Choose file…</button>
+    <button id="uptoggle" type="button" aria-label="Collapse upload panel">▾</button>
   </div>
-  <div id="uphint">Use this when the SaaS asks you to attach a file. The file goes to <code>~/uploads/</code> inside the sandbox; then click the SaaS's own upload button and pick it from there.</div>
-  <div id="upmsg">No file sent yet.</div>
+  <div id="upbody">
+    <button id="upbtn" type="button">Choose file…</button>
+    <div id="uphint">Use this when the SaaS asks you to attach a file. The file goes to <code>~/uploads/</code> inside the sandbox; then click the SaaS's own upload button and pick it from there.</div>
+    <div id="upmsg">No file sent yet.</div>
+  </div>
   <input id="upfile" type="file" style="display:none">
 </div>
 
 <script>
 (function(){
+  const bar = document.getElementById('upbar');
   const btn = document.getElementById('upbtn');
   const inp = document.getElementById('upfile');
   const msg = document.getElementById('upmsg');
+  const tog = document.getElementById('uptoggle');
+  tog.addEventListener('click', () => {
+    const collapsed = bar.classList.toggle('collapsed');
+    tog.textContent = collapsed ? '▴' : '▾';
+  });
   btn.addEventListener('click', () => inp.click());
   inp.addEventListener('change', async () => {
     const f = inp.files && inp.files[0];
@@ -150,6 +184,23 @@ ATTACH_HTML = """<!doctype html>
 </script>
 </body>
 </html>"""
+
+
+_MOBILE_UA_RE = re.compile(r"Mobi|Android|iPhone|iPod|iPad|IEMobile|BlackBerry|Opera Mini", re.I)
+
+
+def _client_profile(request: Request) -> str:
+    """Detect the *real* client device from headers the phone sends to the broker.
+
+    Prefer the Client-Hint (`Sec-CH-UA-Mobile: ?1`, sent by Chromium browsers),
+    fall back to a User-Agent regex. Returns "mobile" or "desktop"; the sandbox
+    Chromium is then launched in the matching emulation profile.
+    """
+    if request.headers.get("sec-ch-ua-mobile", "").strip() == "?1":
+        return "mobile"
+    if _MOBILE_UA_RE.search(request.headers.get("user-agent", "")):
+        return "mobile"
+    return "desktop"
 
 
 def _ensure_session(request: Request) -> tuple[BrowserSession, RedirectResponse | None]:
@@ -203,7 +254,7 @@ async def session_page(request: Request):
     s, redirect = _ensure_session(request)
     if redirect is not None:
         return redirect
-    await allocate_sandbox(s.sub)
+    await allocate_sandbox(s.sub, _client_profile(request))
     return HTMLResponse(ATTACH_HTML)
 
 

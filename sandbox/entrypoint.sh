@@ -10,9 +10,20 @@ set -euo pipefail
 : "${SCREEN_GEOMETRY:=1920x1080x24}"
 : "${CHROME_USER_AGENT:=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36}"
 : "${CHROME_ACCEPT_LANG:=en-US,en;q=0.9}"
+# Device emulation. The broker sets DEVICE_PROFILE=mobile (plus a portrait
+# SCREEN_GEOMETRY, a mobile CHROME_USER_AGENT and a DEVICE_SCALE_FACTOR) when
+# the *real* client browser is a phone, so the SaaS renders its mobile layout.
+: "${DEVICE_PROFILE:=desktop}"
+: "${DEVICE_SCALE_FACTOR:=1}"
+
+# Derive the Chromium window size from the Xvfb geometry (WxHxDepth) so the
+# kiosk window always fills the virtual screen, portrait or landscape.
+WIN_W="${SCREEN_GEOMETRY%%x*}"
+_geom_rest="${SCREEN_GEOMETRY#*x}"
+WIN_H="${_geom_rest%%x*}"
 
 echo "[cloak] SAAS_URL=${SAAS_URL}"
-echo "[cloak] DISPLAY=${DISPLAY} SCREEN=${SCREEN_GEOMETRY}"
+echo "[cloak] DISPLAY=${DISPLAY} SCREEN=${SCREEN_GEOMETRY} PROFILE=${DEVICE_PROFILE} DSF=${DEVICE_SCALE_FACTOR}"
 
 # Resolve novnc share dir (Debian places it at /usr/share/novnc).
 NOVNC_DIR="/usr/share/novnc"
@@ -97,10 +108,25 @@ if [[ "${INSECURE_SAAS}" == "1" ]]; then
   echo "[cloak] INSECURE_SAAS=1 — ignoring cert errors for ${SAAS_HOST}"
 fi
 
+# Mobile emulation flags. A narrow portrait window already makes responsive
+# (CSS media-query) sites switch layout; these flags also flip pointer/hover
+# media features to "touch" and apply a device-scale-factor so UA- and
+# pointer-sniffing SaaS render their proper mobile site at legible size.
+MOBILE_FLAGS=()
+if [[ "${DEVICE_PROFILE}" == "mobile" ]]; then
+  MOBILE_FLAGS+=(
+    --touch-events=enabled
+    --force-device-scale-factor="${DEVICE_SCALE_FACTOR}"
+    --blink-settings=primaryHoverType=4,availableHoverTypes=4,primaryPointerType=2,availablePointerTypes=2
+  )
+  echo "[cloak] DEVICE_PROFILE=mobile — touch + dsf=${DEVICE_SCALE_FACTOR} emulation on"
+fi
+
 CHROME_FLAGS=(
   --kiosk
   --app="${SAAS_URL}"
   "${INSECURE_FLAGS[@]}"
+  "${MOBILE_FLAGS[@]}"
   --no-first-run
   --no-default-browser-check
   --noerrdialogs
@@ -122,7 +148,7 @@ CHROME_FLAGS=(
   --accept-lang="${CHROME_ACCEPT_LANG}"
   --lang=en-US
   --window-position=0,0
-  --window-size=1920,1080
+  --window-size=${WIN_W},${WIN_H}
   --start-fullscreen
   --user-data-dir=/tmp/chrome-profile
 )

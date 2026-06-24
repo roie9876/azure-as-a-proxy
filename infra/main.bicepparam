@@ -20,14 +20,14 @@ param vnetAddressSpace = '10.80.0.0/20'
 //   1. set `acrName = '<your-acr>'`
 //   2. set brokerImage/sandboxImage to '<your-acr>.azurecr.io/...'
 //   3. push images via `scripts/build-and-push.sh <your-acr>`
-param brokerImage  = 'ghcr.io/roie9876/cloak-broker:v1'
-param sandboxImage = 'ghcr.io/roie9876/cloak-sandbox:v1'
-param acrName      = ''   // empty = anonymous public pull (GHCR/Docker Hub/etc.)
+param brokerImage  = 'acrcloakc626e2.azurecr.io/cloak-broker:v1'
+param sandboxImage = 'acrcloakc626e2.azurecr.io/cloak-sandbox:v1'
+param acrName      = 'acrcloakc626e2'   // admin-enabled ACR built via az acr build
 
 // Pin the SaaS the kiosk Chromium will load. Required.
-param saasUrl = 'https://arh2b5deb8dmcvcf.fz37.alb.azure.com/'
+param saasUrl = 'https://www.ynet.co.il/'
 // '1' for the self-signed PoC origin; flip to '0' once SaaS is on a CA-signed cert.
-param insecureSaas = '1'
+param insecureSaas = '0'
 
 // Public source IPs allowed to reach the FD endpoint (WAF custom rule).
 // Empty = no IP restriction (current PoC). Fill with corp egress CIDRs to lock down.

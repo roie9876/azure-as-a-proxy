@@ -41,6 +41,24 @@ class Settings(BaseSettings):
     sandbox_port: int = Field(6901)
     sandbox_scheme: str = Field("http")
 
+    # Device emulation. The broker reads the *real* client's User-Agent /
+    # Sec-CH-UA-Mobile headers (the phone talks to the broker directly) and
+    # provisions the sandbox Chromium in the matching profile, so the SaaS
+    # renders its desktop or mobile layout. noVNC `resize=remote` then fits
+    # the (portrait) framebuffer to the phone screen.
+    mobile_emulation_enabled: bool = Field(True)
+    desktop_screen_geometry: str = Field("1920x1080x24")
+    desktop_user_agent: str = Field(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+    )
+    mobile_screen_geometry: str = Field("412x915x24", description="Portrait WxHxDepth for phone sandboxes")
+    mobile_device_scale_factor: float = Field(2.0, description="Chromium --force-device-scale-factor for phone sandboxes")
+    mobile_user_agent: str = Field(
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+    )
+
     # Session lifecycle
     attach_token_ttl_seconds: int = Field(60)
     session_idle_timeout_seconds: int = Field(900)

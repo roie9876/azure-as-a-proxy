@@ -291,6 +291,26 @@ Both sides log the same `sha256`, so cross-checking broker logs against the sand
 
 Full API reference, error codes, threat-model notes (MIME spoofing, AV, DoS, cross-tenant fan-out): [docs/UPLOAD.md](docs/UPLOAD.md).
 
+### 5.6 Mobile / phone access — device-aware sandbox rendering
+
+**Problem.** Opening the cloak from a phone gave a broken experience: the page looked like a shrunk desktop site and the upload control was effectively off-screen. There are actually **two** pages involved, and both were desktop-only:
+
+1. The broker's wrapper page ([`ATTACH_HTML`](broker/app/main.py)) — the thin HTML that hosts the noVNC iframe + the "Send file to sandbox" panel. It had **no `<meta name="viewport">`**, so phones rendered it at a ~980 px desktop width and scaled everything down, pushing the tiny upload card out of reach.
+2. The SaaS itself, rendered by the **sandbox Chromium**, which runs at a fixed `1920×1080` desktop resolution with a Windows User-Agent. The SaaS therefore always served its **desktop** layout; noVNC then shrank those pixels onto the phone, so the SaaS's own **mobile** UI (including its mobile upload button) never appeared.
+
+**Key insight.** You don't need to forward any device hint into Azure. The phone's browser talks to the **broker** directly (Front Door → broker), so the broker already sees the real client's `User-Agent` and `Sec-CH-UA-Mobile` headers. The "desktop" assumption lived only in the *sandbox* Chromium — which the broker controls at provisioning time.
+
+**Fix — two parts:**
+
+| Layer | Change |
+|---|---|
+| Wrapper page ([`broker/app/main.py`](broker/app/main.py)) | Added the viewport meta tag + responsive CSS. On phones/touch (`@media (max-width:640px),(pointer:coarse)`) the upload panel docks to the **bottom edge, full-width, 48 px tap targets**, is **collapsible**, and respects `env(safe-area-inset-*)` for notch/home-indicator. Desktop keeps the original top-right card. |
+| Sandbox emulation ([`broker/app/sessions.py`](broker/app/sessions.py) + [`sandbox/entrypoint.sh`](sandbox/entrypoint.sh)) | The broker detects mobile from the client headers ([`_client_profile`](broker/app/main.py)) and provisions the per-browser ACI Chromium in a **mobile profile**: portrait Xvfb geometry (`412×915`), a mobile UA, `--touch-events=enabled`, `--force-device-scale-factor`, and touch pointer/hover Blink settings. The SaaS now serves its mobile site, and noVNC's `resize=remote` fits the portrait framebuffer to the phone. |
+
+**Warm-pool behaviour.** The warm pool is **desktop-only** (you can't pre-warm a device profile before the client connects). Mobile clients **cold-provision** a mobile sandbox on first hit; if a user's device profile changes (laptop → phone) the old sandbox is torn down and rebuilt with the correct emulation. Tunables live in [`broker/app/config.py`](broker/app/config.py): `mobile_emulation_enabled`, `mobile_screen_geometry`, `mobile_device_scale_factor`, `mobile_user_agent`.
+
+> Note: iPads on modern Safari report a desktop-style UA and no `Sec-CH-UA-Mobile`, so they are treated as desktop. The pixel stream is still a fixed-resolution framebuffer scaled to fit — see §6.1.
+
 ---
 
 ## 6. Constraints — what this design does **NOT** solve
