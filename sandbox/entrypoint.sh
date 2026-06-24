@@ -16,11 +16,19 @@ set -euo pipefail
 : "${DEVICE_PROFILE:=desktop}"
 : "${DEVICE_SCALE_FACTOR:=1}"
 
-# Derive the Chromium window size from the Xvfb geometry (WxHxDepth) so the
-# kiosk window always fills the virtual screen, portrait or landscape.
-WIN_W="${SCREEN_GEOMETRY%%x*}"
+# Derive the Chromium window size from the Xvfb geometry (WxHxDepth). Chromium's
+# --window-size is in DIP (CSS px); on screen the window occupies WIN*DSF
+# physical px. So divide the *physical* geometry by the device-scale-factor to
+# get the DIP window size — this keeps the kiosk window matching the Xvfb screen
+# and the CSS layout viewport at a real device width (e.g. 828x1792 physical @
+# DSF 2 -> 414x896 CSS, an iPhone-class viewport). Desktop uses DSF 1 (no-op).
+_SCREEN_W="${SCREEN_GEOMETRY%%x*}"
 _geom_rest="${SCREEN_GEOMETRY#*x}"
-WIN_H="${_geom_rest%%x*}"
+_SCREEN_H="${_geom_rest%%x*}"
+_DSF_INT="${DEVICE_SCALE_FACTOR%.*}"
+{ [[ "${_DSF_INT}" =~ ^[0-9]+$ ]] && [[ "${_DSF_INT}" -ge 1 ]]; } || _DSF_INT=1
+WIN_W=$(( _SCREEN_W / _DSF_INT ))
+WIN_H=$(( _SCREEN_H / _DSF_INT ))
 
 echo "[cloak] SAAS_URL=${SAAS_URL}"
 echo "[cloak] DISPLAY=${DISPLAY} SCREEN=${SCREEN_GEOMETRY} PROFILE=${DEVICE_PROFILE} DSF=${DEVICE_SCALE_FACTOR}"

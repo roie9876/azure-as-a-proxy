@@ -52,7 +52,7 @@ class Settings(BaseSettings):
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
     )
-    mobile_screen_geometry: str = Field("412x915x24", description="Portrait WxHxDepth for phone sandboxes")
+    mobile_screen_geometry: str = Field("828x1792x24", description="Portrait WxHxDepth (physical px) for phone sandboxes; CSS viewport = this / device_scale_factor (828x1792 @ 2.0 -> 414x896, iPhone-class)")
     mobile_device_scale_factor: float = Field(2.0, description="Chromium --force-device-scale-factor for phone sandboxes")
     mobile_user_agent: str = Field(
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
