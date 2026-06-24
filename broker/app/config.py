@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     # Warm pool: keep N idle sandboxes ready for instant alloc
     warm_pool_size: int = Field(2, ge=0, le=20)
+    # Idle mobile-profile sandboxes kept warm so phone sessions don't cold-start
+    # (a cold ACI start exceeds the Front Door origin-response timeout -> 504).
+    mobile_warm_pool_size: int = Field(1, ge=0, le=10)
 
     # VNC password for sandbox (broker proxies, user never types it).
     sandbox_vnc_password: str = Field("cloak-poc-vnc")

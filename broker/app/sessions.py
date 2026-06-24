@@ -135,8 +135,11 @@ class AttachRecord:
     expires_at: float = field(default_factory=lambda: time.time() + 60)
 
 
-# In-memory state
-_idle_pool: dict[str, Sandbox] = {}      # name -> Sandbox (Running, unclaimed)
+# In-memory state. Idle pools are per device profile so a phone session can
+# claim a pre-warmed mobile sandbox instantly instead of cold-starting (a cold
+# ACI start exceeds the Front Door origin-response timeout -> 504).
+_idle_pool: dict[str, Sandbox] = {}         # desktop: name -> Sandbox (Running, unclaimed)
+_idle_pool_mobile: dict[str, Sandbox] = {}  # mobile:  name -> Sandbox (Running, unclaimed)
 _pending: dict[str, Sandbox] = {}        # name -> Sandbox (still provisioning)
 _claimed: dict[str, Sandbox] = {}        # name -> Sandbox (claimed by user)
 _user_to_sandbox: dict[str, str] = {}    # user_sub -> sandbox name
@@ -144,6 +147,16 @@ _attach_store: dict[str, AttachRecord] = {}
 
 _pool_lock = asyncio.Lock()
 _warmer_task: Optional[asyncio.Task] = None
+
+
+def _pool_for(profile: str) -> dict[str, Sandbox]:
+    """Return the idle pool dict for a device profile."""
+    return _idle_pool_mobile if profile == "mobile" else _idle_pool
+
+
+def _pending_count(profile: str) -> int:
+    """Count in-flight (provisioning) sandboxes for a profile."""
+    return sum(1 for s in _pending.values() if s.profile == profile)
 
 
 async def _arm_request(method: str, url: str, json_body: Optional[dict] = None) -> tuple[int, dict]:
@@ -199,10 +212,10 @@ async def _delete_aci(name: str) -> None:
         logger.warning("ACI delete %s failed: %s", name, ex)
 
 
-async def _provision_one_into_pool() -> None:
+async def _provision_one_into_pool(profile: str = "desktop") -> None:
     name = f"sbx-{int(time.time())}-{_secrets.token_hex(3)}"
     try:
-        sb = await _create_aci(name)
+        sb = await _create_aci(name, profile)
     except Exception as ex:  # noqa: BLE001
         logger.error("warm provision failed: %s", ex)
         return
@@ -213,18 +226,25 @@ async def _provision_one_into_pool() -> None:
         return
     async with _pool_lock:
         if sb.claimed_by is None and name not in _claimed:
-            _idle_pool[name] = sb
-            logger.info("warm sandbox ready: %s ip=%s (idle pool size=%d)", name, sb.private_ip, len(_idle_pool))
+            pool = _pool_for(profile)
+            pool[name] = sb
+            logger.info("warm %s sandbox ready: %s ip=%s (idle pool size=%d)", profile, name, sb.private_ip, len(pool))
 
 
 async def _warmer_loop() -> None:
-    """Keep _idle_pool at WARM_POOL_SIZE."""
+    """Keep each profile's idle pool at its configured size."""
     while True:
         try:
             async with _pool_lock:
-                shortfall = settings.warm_pool_size - len(_idle_pool) - len(_pending)
-            if shortfall > 0:
-                await asyncio.gather(*[_provision_one_into_pool() for _ in range(shortfall)])
+                desktop_short = settings.warm_pool_size - len(_idle_pool) - _pending_count("desktop")
+                mobile_short = (
+                    settings.mobile_warm_pool_size - len(_idle_pool_mobile) - _pending_count("mobile")
+                    if settings.mobile_emulation_enabled else 0
+                )
+            tasks = [_provision_one_into_pool("desktop") for _ in range(max(0, desktop_short))]
+            tasks += [_provision_one_into_pool("mobile") for _ in range(max(0, mobile_short))]
+            if tasks:
+                await asyncio.gather(*tasks)
             await asyncio.sleep(10)
         except asyncio.CancelledError:
             raise
@@ -252,11 +272,11 @@ async def stop_warmer() -> None:
 
 
 async def allocate_sandbox(user_sub: str, profile: str = "desktop") -> AttachRecord:
-    """Claim a warm sandbox; if pool empty, provision on demand and wait.
+    """Claim a warm sandbox; if the matching pool is empty, provision on demand.
 
-    The warm pool is desktop-only (we can't pre-warm a device profile we don't
-    yet know). When the real client is a phone (`profile="mobile"`) we always
-    cold-provision a mobile-emulated sandbox so the SaaS renders its mobile UI.
+    Idle pools are per device profile (desktop + mobile), so a phone session
+    claims a pre-warmed mobile sandbox instantly. Only if that pool is empty do
+    we cold-provision (which can exceed the Front Door origin timeout).
     """
     if not settings.mobile_emulation_enabled:
         profile = "desktop"
@@ -272,9 +292,9 @@ async def allocate_sandbox(user_sub: str, profile: str = "desktop") -> AttachRec
             await destroy_sandbox(user_sub)
         async with _pool_lock:
             sb: Optional[Sandbox] = None
-            # Mobile bypasses the desktop warm pool.
-            if profile == "desktop" and _idle_pool:
-                name, sb = _idle_pool.popitem()
+            pool = _pool_for(profile)
+            if pool:
+                name, sb = pool.popitem()
                 sb.claimed_by = user_sub
                 sb.state = "Claimed"
                 _claimed[name] = sb
